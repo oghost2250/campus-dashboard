@@ -377,7 +377,7 @@ async function main() {
       passwordHash: await hash("campus1234", 10),
       locale: "en",
       emailVerified: new Date(),
-      role: "ADMIN",
+      role: "USER",
       status: "ACTIVE",
       approvedAt: new Date(),
     },

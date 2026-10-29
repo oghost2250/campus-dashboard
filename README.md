@@ -49,11 +49,16 @@ npm run dev
 ```
 
 Open <http://localhost:3000>. The seed creates three demo accounts, all with the
-password `campus1234`:
+password `campus1234`. To make yourself the admin, register (or have an admin
+create) your account, then run:
+
+```bash
+npm run db:promote -- s-o.ali77@zewailcity.edu.eg
+```
 
 | Email                           | Role  | Status  | What it shows                              |
 | ------------------------------- | ----- | ------- | ------------------------------------------ |
-| `s-o.demo77@zewailcity.edu.eg`  | Admin | Active  | Full workspace + the Accounts admin page   |
+| `s-o.demo77@zewailcity.edu.eg`  | User  | Active  | Full workspace with demo data (tasks, courses, snippets…) |
 | `s-o.mariam31@zewailcity.edu.eg`| User  | Active  | An approved student with a little activity |
 | `s-o.nour12@zewailcity.edu.eg`  | User  | Pending | The waiting screen at `/pending`           |
 
