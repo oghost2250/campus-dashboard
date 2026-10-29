@@ -46,6 +46,7 @@ export const ar: Dictionary = {
     pomodoro: "بومودورو",
     notes: "المسودة",
     syllabus: "الخطة الدراسية",
+    schedule: "الجدول الأسبوعي",
     utilities: "أدوات المطوّر",
     projects: "المشاريع",
     academic: "أكاديمي",
@@ -276,7 +277,7 @@ export const ar: Dictionary = {
   },
   utilities: {
     title: "أدوات المطوّر",
-    subtitle: "نسّق JSON وحوّل الأرقام بين الأنظمة — لا تغادر بياناتك متصفحك.",
+    subtitle: "حوّل الأرقام بين الأنظمة — لا تغادر بياناتك متصفحك.",
     jsonTab: "JSON",
     baseTab: "محوّل الأنظمة",
     format: "تنسيق",

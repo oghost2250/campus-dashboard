@@ -49,6 +49,7 @@ export const en = {
     pomodoro: "Pomodoro",
     notes: "Scratchpad",
     syllabus: "Syllabus",
+    schedule: "Schedule",
     utilities: "Dev utilities",
     projects: "Projects",
     academic: "Academic",
@@ -280,7 +281,7 @@ export const en = {
   },
   utilities: {
     title: "Developer utilities",
-    subtitle: "Format JSON and convert numbers between bases — no data leaves your browser.",
+    subtitle: "Convert numbers between bases — everything stays in your browser.",
     jsonTab: "JSON",
     baseTab: "Base converter",
     format: "Format",

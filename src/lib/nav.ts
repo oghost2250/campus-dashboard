@@ -1,5 +1,6 @@
 import {
   BookOpenCheck,
+  CalendarDays,
   Calculator,
   Code2,
   FolderGit2,
@@ -20,6 +21,7 @@ export type NavItem = {
     | "tasks"
     | "gpa"
     | "syllabus"
+    | "schedule"
     | "snippets"
     | "utilities"
     | "projects"
@@ -53,6 +55,7 @@ export const navGroups: NavGroup[] = [
       { href: "/dashboard/tasks", id: "tasks", icon: ListChecks },
       { href: "/dashboard/gpa", id: "gpa", icon: Calculator },
       { href: "/dashboard/syllabus", id: "syllabus", icon: BookOpenCheck },
+      { href: "/dashboard/schedule", id: "schedule", icon: CalendarDays },
     ],
   },
   {
