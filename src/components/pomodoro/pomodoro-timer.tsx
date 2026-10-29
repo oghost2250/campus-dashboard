@@ -20,9 +20,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/i18n/provider";
-import { formatTime } from "@/lib/format";
-import type { PomodoroDTO } from "@/lib/types";
+import { formatDate, formatTime } from "@/lib/format";
+import type { FocusAnalyticsDTO, PomodoroDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { AmbientSounds } from "@/components/pomodoro/ambient-sounds";
 
 type Mode = "focus" | "short" | "long";
 
@@ -100,10 +101,12 @@ export function PomodoroTimer({
   todayMinutes: initialMinutes,
   todaySessions: initialSessions,
   recent: initialRecent,
+  analytics: initialAnalytics,
 }: {
   todayMinutes: number;
   todaySessions: number;
   recent: PomodoroDTO[];
+  analytics: FocusAnalyticsDTO;
 }) {
   const { t, locale } = useI18n();
 
@@ -116,6 +119,7 @@ export function PomodoroTimer({
   const [todayMinutes, setTodayMinutes] = useState(initialMinutes);
   const [todaySessions, setTodaySessions] = useState(initialSessions);
   const [recent, setRecent] = useState(initialRecent);
+  const [analytics, setAnalytics] = useState(initialAnalytics);
 
   const deadlineRef = useRef<number | null>(null);
   const startedAtRef = useRef<Date | null>(null);
@@ -201,6 +205,28 @@ export function PomodoroTimer({
         startedAt: started.toISOString(),
       };
       setRecent((value) => [entry, ...value].slice(0, 8));
+
+      setAnalytics((current) => {
+        const previousToday =
+          current.days[current.days.length - 1]?.minutes ?? 0;
+        const days = current.days.map((day, index) =>
+          index === current.days.length - 1
+            ? {
+                ...day,
+                minutes: day.minutes + duration,
+                sessions: day.sessions + 1,
+              }
+            : day,
+        );
+
+        return {
+          days,
+          totalMinutes: current.totalMinutes + duration,
+          totalSessions: current.totalSessions + 1,
+          bestDayMinutes: Math.max(current.bestDayMinutes, days[days.length - 1].minutes),
+          streak: previousToday === 0 ? current.streak + 1 : current.streak,
+        };
+      });
 
       void logSession(duration, started);
 
@@ -627,6 +653,8 @@ export function PomodoroTimer({
             </div>
           </section>
 
+          <AmbientSounds />
+
           <section className="rounded-2xl border border-border/70 bg-card/70 p-5 shadow-soft backdrop-blur-sm">
             <p className="text-xs font-semibold tracking-tight">
               {t.pomodoro.recentSessions}
@@ -658,6 +686,100 @@ export function PomodoroTimer({
           </section>
         </div>
       </div>
+
+      <section className="rounded-2xl border border-border/70 bg-card/70 p-5 shadow-soft backdrop-blur-sm">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold tracking-tight">
+              {t.pomodoro.analyticsTitle}
+            </p>
+            <p className="mt-0.5 text-[10px] text-muted-foreground">
+              {t.pomodoro.analyticsSubtitle}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t.pomodoro.totalFocus}
+              </p>
+              <p className="text-sm font-semibold tabular-nums">
+                {analytics.totalMinutes}
+                <span className="ms-1 text-[10px] font-normal text-muted-foreground">
+                  {t.pomodoro.minutesShort}
+                </span>
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t.pomodoro.totalSessions}
+              </p>
+              <p className="text-sm font-semibold tabular-nums">
+                {analytics.totalSessions}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t.pomodoro.streak}
+              </p>
+              <p className="text-sm font-semibold tabular-nums">
+                {analytics.streak}
+              </p>
+            </div>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {t.pomodoro.bestDay}
+              </p>
+              <p className="text-sm font-semibold tabular-nums">
+                {analytics.bestDayMinutes}
+                <span className="ms-1 text-[10px] font-normal text-muted-foreground">
+                  {t.pomodoro.minutesShort}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {analytics.totalSessions === 0 ? (
+          <p className="mt-6 text-[11px] text-muted-foreground">
+            {t.pomodoro.noAnalytics}
+          </p>
+        ) : (
+          <div className="mt-5 flex h-36 items-end gap-1.5">
+            {analytics.days.map((day) => {
+              const height =
+                analytics.bestDayMinutes === 0
+                  ? 0
+                  : Math.round((day.minutes / analytics.bestDayMinutes) * 100);
+
+              return (
+                <div
+                  key={day.date}
+                  className="group flex min-w-0 flex-1 flex-col items-center gap-1.5"
+                  title={`${formatDate(`${day.date}T00:00:00`, locale)} · ${day.minutes} ${t.pomodoro.minutesShort}`}
+                >
+                  <div className="flex h-28 w-full items-end">
+                    <div
+                      className={cn(
+                        "w-full rounded-t-md transition-[height] duration-300",
+                        day.minutes > 0
+                          ? "bg-gradient-to-t from-primary/45 to-primary"
+                          : "bg-muted",
+                      )}
+                      style={{
+                        height: `${Math.max(day.minutes > 0 ? 6 : 3, height)}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-[9px] tabular-nums text-muted-foreground">
+                    {day.date.slice(-2)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

@@ -3,7 +3,9 @@ import type {
   Course,
   Note,
   PomodoroSession,
+  Project,
   Snippet,
+  SyllabusTopic,
   Task,
   UserRole,
   UserStatus,
@@ -14,7 +16,9 @@ import type {
   CourseDTO,
   NoteDTO,
   PomodoroDTO,
+  ProjectDTO,
   SnippetDTO,
+  SyllabusTopicDTO,
   TaskDTO,
 } from "@/lib/types";
 
@@ -44,8 +48,38 @@ export function snippetDTO(snippet: Snippet): SnippetDTO {
     language: snippet.language,
     tags: snippet.tags,
     isFavorite: snippet.isFavorite,
+    isPublic: snippet.isPublic,
+    shareSlug: snippet.shareSlug,
     createdAt: snippet.createdAt.toISOString(),
     updatedAt: snippet.updatedAt.toISOString(),
+  };
+}
+
+export function syllabusTopicDTO(topic: SyllabusTopic): SyllabusTopicDTO {
+  return {
+    id: topic.id,
+    course: topic.course,
+    title: topic.title,
+    isDone: topic.isDone,
+    position: topic.position,
+    createdAt: topic.createdAt.toISOString(),
+    updatedAt: topic.updatedAt.toISOString(),
+  };
+}
+
+export function projectDTO(project: Project): ProjectDTO {
+  return {
+    id: project.id,
+    title: project.title,
+    description: project.description,
+    techStack: project.techStack,
+    repoUrl: project.repoUrl,
+    liveUrl: project.liveUrl,
+    status: project.status,
+    completedAt: iso(project.completedAt),
+    featured: project.featured,
+    createdAt: project.createdAt.toISOString(),
+    updatedAt: project.updatedAt.toISOString(),
   };
 }
 

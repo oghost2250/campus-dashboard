@@ -1,18 +1,31 @@
 import {
+  BookOpenCheck,
   Calculator,
   Code2,
+  FolderGit2,
   LayoutDashboard,
   ListChecks,
   NotebookPen,
   ShieldCheck,
   Timer,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
 export type NavItem = {
   href: string;
   /** Key inside `dictionary.nav` */
-  id: "dashboard" | "tasks" | "gpa" | "snippets" | "pomodoro" | "notes" | "admin";
+  id:
+    | "dashboard"
+    | "tasks"
+    | "gpa"
+    | "syllabus"
+    | "snippets"
+    | "utilities"
+    | "projects"
+    | "pomodoro"
+    | "notes"
+    | "admin";
   icon: LucideIcon;
 };
 
@@ -39,11 +52,16 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/dashboard/tasks", id: "tasks", icon: ListChecks },
       { href: "/dashboard/gpa", id: "gpa", icon: Calculator },
+      { href: "/dashboard/syllabus", id: "syllabus", icon: BookOpenCheck },
     ],
   },
   {
     id: "developer",
-    items: [{ href: "/dashboard/snippets", id: "snippets", icon: Code2 }],
+    items: [
+      { href: "/dashboard/snippets", id: "snippets", icon: Code2 },
+      { href: "/dashboard/utilities", id: "utilities", icon: Wrench },
+      { href: "/dashboard/projects", id: "projects", icon: FolderGit2 },
+    ],
   },
   {
     id: "productivity",

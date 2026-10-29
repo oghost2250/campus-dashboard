@@ -1,16 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check,
   Code2,
   Copy,
+  ExternalLink,
+  Globe,
   Loader2,
   MoreHorizontal,
   Pencil,
   Plus,
   Search,
+  Share2,
   Star,
   Trash2,
 } from "lucide-react";
@@ -112,8 +116,13 @@ export function SnippetGrid({
 
   const [viewing, setViewing] = useState<SnippetDTO | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SnippetDTO | null>(null);
+  const [shareTarget, setShareTarget] = useState<SnippetDTO | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [origin, setOrigin] = useState("");
 
   useEffect(() => setSnippets(initialSnippets), [initialSnippets]);
+  useEffect(() => setOrigin(window.location.origin), []);
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -254,6 +263,55 @@ export function SnippetGrid({
     }
   }
 
+  function openShare(snippet: SnippetDTO) {
+    setLinkCopied(false);
+    setShareTarget(snippet);
+  }
+
+  async function toggleShare() {
+    if (!shareTarget) return;
+
+    const next = !shareTarget.isPublic;
+    setSharing(true);
+
+    try {
+      const response = await fetch(
+        `/api/snippets/${shareTarget.id}/share`,
+        { method: next ? "POST" : "DELETE" },
+      );
+      if (!response.ok) throw new Error("request failed");
+
+      const data = (await response.json()) as { snippet: SnippetDTO | null };
+      if (!data.snippet) throw new Error("request failed");
+
+      const updated = data.snippet;
+      setSnippets((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      setShareTarget(updated);
+      toast.success(
+        next ? t.snippets.shareEnabled : t.snippets.shareDisabled,
+      );
+    } catch {
+      toast.error(t.common.error);
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function copyShareLink(snippet: SnippetDTO) {
+    if (!snippet.shareSlug) return;
+
+    try {
+      await navigator.clipboard.writeText(`${origin}/s/${snippet.shareSlug}`);
+      setLinkCopied(true);
+      toast.success(t.snippets.linkCopied);
+      window.setTimeout(() => setLinkCopied(false), 1600);
+    } catch {
+      toast.error(t.common.error);
+    }
+  }
+
   const usedLanguages = [...new Set(snippets.map((item) => item.language))].sort();
 
   return (
@@ -355,8 +413,14 @@ export function SnippetGrid({
                     <p className="truncate text-sm font-medium transition-colors group-hover:text-primary">
                       {snippet.title}
                     </p>
-                    <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                    <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
                       {languageLabel(snippet.language)}
+                      {snippet.isPublic ? (
+                        <span className="inline-flex items-center gap-0.5 rounded bg-success/12 px-1 py-px font-sans text-[9px] font-medium text-success">
+                          <Globe className="size-2.5" />
+                          {t.snippets.publicBadge}
+                        </span>
+                      ) : null}
                     </p>
                   </button>
 
@@ -414,6 +478,13 @@ export function SnippetGrid({
                       >
                         <Copy className="size-4" />
                         {t.common.copy}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="cursor-pointer"
+                        onClick={() => openShare(snippet)}
+                      >
+                        <Share2 className="size-4" />
+                        {t.snippets.share}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
@@ -656,6 +727,119 @@ export function SnippetGrid({
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Share */}
+      <Dialog
+        open={shareTarget !== null}
+        onOpenChange={(open) => !open && setShareTarget(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          {shareTarget ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-start">
+                  <Share2 className="size-4 text-primary" />
+                  {t.snippets.shareTitle}
+                </DialogTitle>
+                <DialogDescription className="text-start">
+                  {t.snippets.shareBody}
+                </DialogDescription>
+              </DialogHeader>
+
+              <p className="truncate rounded-lg bg-muted/50 px-3 py-2 text-xs font-medium">
+                {shareTarget.title}
+              </p>
+
+              {shareTarget.isPublic && shareTarget.shareSlug ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      dir="ltr"
+                      value={`${origin}/s/${shareTarget.shareSlug}`}
+                      aria-label={t.snippets.shareTitle}
+                      className="h-10 rounded-xl font-mono text-[11px]"
+                      onFocus={(event) => event.currentTarget.select()}
+                    />
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="size-10 shrink-0 rounded-xl"
+                      onClick={() => copyShareLink(shareTarget)}
+                      aria-label={t.snippets.copyLink}
+                    >
+                      {linkCopied ? (
+                        <Check className="size-4 text-success" />
+                      ) : (
+                        <Copy className="size-4" />
+                      )}
+                    </Button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="h-9 rounded-lg"
+                    >
+                      <Link
+                        href={`/s/${shareTarget.shareSlug}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        <ExternalLink className="size-3.5" />
+                        {t.snippets.openLink}
+                      </Link>
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 rounded-lg text-destructive hover:text-destructive"
+                      onClick={toggleShare}
+                      disabled={sharing}
+                    >
+                      {sharing ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <Globe className="size-3.5" />
+                      )}
+                      {t.snippets.disableShare}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  className="h-10 rounded-xl"
+                  onClick={toggleShare}
+                  disabled={sharing}
+                >
+                  {sharing ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Share2 className="size-4" />
+                  )}
+                  {t.snippets.enableShare}
+                </Button>
+              )}
+
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="rounded-xl"
+                  onClick={() => setShareTarget(null)}
+                >
+                  {t.common.close}
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
         </DialogContent>
       </Dialog>
 

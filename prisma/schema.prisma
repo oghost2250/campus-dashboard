@@ -48,13 +48,15 @@ model User {
   createdAt     DateTime   @default(now())
   updatedAt     DateTime   @updatedAt
 
-  accounts  Account[]
-  sessions  Session[]
-  tasks     Task[]
-  snippets  Snippet[]
-  courses   Course[]
-  notes     Note[]
-  pomodoros PomodoroSession[]
+  accounts       Account[]
+  sessions       Session[]
+  tasks          Task[]
+  snippets       Snippet[]
+  courses        Course[]
+  notes          Note[]
+  pomodoros      PomodoroSession[]
+  syllabusTopics SyllabusTopic[]
+  projects       Project[]
 
   @@map("users")
 }
@@ -184,6 +186,26 @@ model Assessment {
   @@map("assessments")
 }
 
+/// A single syllabus checklist item. Topics are grouped by the free-text
+/// `course` field so a student can track a syllabus before (or without)
+/// creating a GPA course.
+model SyllabusTopic {
+  id        String   @id @default(cuid())
+  course    String
+  title     String
+  isDone    Boolean  @default(false)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, course])
+  @@index([userId, isDone])
+  @@map("syllabus_topics")
+}
+
 // ---------------------------------------------------------------------------
 // Developer zone
 // ---------------------------------------------------------------------------
@@ -195,15 +217,49 @@ model Snippet {
   language   String   @default("typescript")
   tags       String[] @default([])
   isFavorite Boolean  @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+
+  /// Public sharing. `shareSlug` is unguessable and stable while the link is live.
+  isPublic  Boolean @default(false)
+  shareSlug String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, updatedAt])
   @@index([userId, language])
+  @@index([isPublic])
   @@map("snippets")
+}
+
+enum ProjectStatus {
+  IN_PROGRESS
+  COMPLETED
+  ARCHIVED
+}
+
+/// Portfolio entry for a college / personal project.
+model Project {
+  id          String        @id @default(cuid())
+  title       String
+  description String?       @db.Text
+  techStack   String[]      @default([])
+  repoUrl     String?
+  liveUrl     String?
+  status      ProjectStatus @default(COMPLETED)
+  completedAt DateTime?
+  featured    Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([userId, updatedAt])
+  @@map("projects")
 }
 
 // ---------------------------------------------------------------------------

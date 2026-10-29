@@ -218,6 +218,8 @@ export async function moveTask(taskId: string, status: TaskStatus) {
     language: "css",
     tags: ["css", "ui", "glassmorphism"],
     isFavorite: false,
+    isPublic: true,
+    shareSlug: "glass-card-demo-7f3a9c1e",
     code: `.glass {
   background: color-mix(in oklab, var(--card) 72%, transparent);
   backdrop-filter: blur(18px) saturate(140%);
@@ -244,6 +246,54 @@ export async function moveTask(taskId: string, status: TaskStatus) {
 from assessments
 where score is not null
 order by course_id, course_rank;`,
+  },
+];
+
+const syllabusTopics = [
+  { course: "CS 431", title: "Lexical analysis & regular expressions", isDone: true },
+  { course: "CS 431", title: "Recursive descent parsing", isDone: true },
+  { course: "CS 431", title: "Intermediate representations", isDone: false },
+  { course: "CS 431", title: "Register allocation", isDone: false },
+  { course: "CS 340", title: "Processes & threads", isDone: true },
+  { course: "CS 340", title: "Scheduling algorithms", isDone: true },
+  { course: "CS 340", title: "Virtual memory", isDone: false },
+  { course: "MATH 241", title: "Eigenvalues & diagonalisation", isDone: true },
+  { course: "MATH 241", title: "Singular value decomposition", isDone: false },
+];
+
+const projects = [
+  {
+    title: "Campus Dashboard",
+    description:
+      "A multi-tenant student workspace with assignments, GPA projections, snippets, and focus tracking. Built as my capstone web project.",
+    techStack: ["Next.js", "TypeScript", "Prisma", "Postgres", "Tailwind"],
+    repoUrl: "https://github.com/oghost2250/campus-dashboard",
+    liveUrl: null,
+    status: "COMPLETED" as const,
+    completedAt: day(-20, 12),
+    featured: true,
+  },
+  {
+    title: "Tiny Regex Engine",
+    description:
+      "A Thompson NFA regex matcher written from scratch in C, with a small CLI and a visualiser for the state graph.",
+    techStack: ["C", "Make", "Graphviz"],
+    repoUrl: "https://github.com/oghost2250",
+    liveUrl: null,
+    status: "COMPLETED" as const,
+    completedAt: day(-55, 12),
+    featured: false,
+  },
+  {
+    title: "Campus Ride Share",
+    description:
+      "A course project matching students commuting to the same campus gate. Currently adding live trip tracking.",
+    techStack: ["Flutter", "Firebase", "Node.js"],
+    repoUrl: null,
+    liveUrl: null,
+    status: "IN_PROGRESS" as const,
+    completedAt: null,
+    featured: false,
   },
 ];
 
@@ -419,6 +469,18 @@ async function main() {
     data: snippets.map((snippet) => ({ ...snippet, userId: user.id })),
   });
 
+  await prisma.syllabusTopic.createMany({
+    data: syllabusTopics.map((topic, index) => ({
+      ...topic,
+      position: index,
+      userId: user.id,
+    })),
+  });
+
+  await prisma.project.createMany({
+    data: projects.map((project) => ({ ...project, userId: user.id })),
+  });
+
   await prisma.note.createMany({
     data: notes.map((note) => ({ ...note, userId: user.id })),
   });
@@ -439,7 +501,7 @@ async function main() {
   console.log(`  active:  ${ACTIVE_EMAIL}`);
   console.log("  password: campus1234 (all three)");
   console.log(
-    `  ${tasks.length} tasks · ${courses.length} courses · ${snippets.length} snippets · ${notes.length} notes`,
+    `  ${tasks.length} tasks · ${courses.length} courses · ${snippets.length} snippets · ${syllabusTopics.length} topics · ${projects.length} projects · ${notes.length} notes`,
   );
 }
 

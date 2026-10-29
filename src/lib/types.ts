@@ -1,5 +1,6 @@
 import type {
   AssessmentType,
+  ProjectStatus,
   TaskPriority,
   TaskStatus,
   UserRole,
@@ -26,8 +27,49 @@ export type SnippetDTO = {
   language: string;
   tags: string[];
   isFavorite: boolean;
+  isPublic: boolean;
+  shareSlug: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type SyllabusTopicDTO = {
+  id: string;
+  course: string;
+  title: string;
+  isDone: boolean;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProjectDTO = {
+  id: string;
+  title: string;
+  description: string | null;
+  techStack: string[];
+  repoUrl: string | null;
+  liveUrl: string | null;
+  status: ProjectStatus;
+  completedAt: string | null;
+  featured: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type FocusDayDTO = {
+  /** Local `YYYY-MM-DD` key. */
+  date: string;
+  minutes: number;
+  sessions: number;
+};
+
+export type FocusAnalyticsDTO = {
+  days: FocusDayDTO[];
+  totalMinutes: number;
+  totalSessions: number;
+  streak: number;
+  bestDayMinutes: number;
 };
 
 export type NoteDTO = {

@@ -8,6 +8,7 @@ import {
   unauthorized,
 } from "@/lib/api";
 import { snippetInputSchema } from "@/lib/validations/snippet";
+import { snippetDTO } from "@/lib/serialize";
 
 export async function GET() {
   const userId = await requireUserId();
@@ -18,7 +19,7 @@ export async function GET() {
     orderBy: { updatedAt: "desc" },
   });
 
-  return NextResponse.json({ snippets });
+  return NextResponse.json({ snippets: snippets.map(snippetDTO) });
 }
 
 export async function POST(request: Request) {
@@ -37,5 +38,8 @@ export async function POST(request: Request) {
     },
   });
 
-  return NextResponse.json({ snippet }, { status: 201 });
+  return NextResponse.json(
+    { snippet: snippetDTO(snippet) },
+    { status: 201 },
+  );
 }

@@ -5,7 +5,7 @@ account gets its own isolated slice of tasks, courses, snippets, notes, and focu
 sessions — in English or Arabic, light or dark.
 
 ```
-Assignments · GPA calculator · Snippet manager · Pomodoro · Scratchpad
+Assignments · GPA calculator · Snippet manager (shareable) · Pomodoro + analytics · Scratchpad · Syllabus tracker · Dev utilities · Project portfolio
 ```
 
 ---
@@ -333,7 +333,21 @@ The repo was exercised end-to-end against a local PostgreSQL 18 instance:
 
 ---
 
-## Known limitations
+## Features (added)
+
+- **Syllabus tracker** — `/dashboard/syllabus`: per-course checklist with
+  completion percentages, quick add, and an overall progress ring.
+- **Developer utilities** — `/dashboard/utilities`: JSON formatter/minifier
+  and a hex/binary/decimal base converter, fully client-side.
+- **Shareable snippets** — public links at `/s/[slug]` with unguessable slugs,
+  toggled via `POST/DELETE /api/snippets/[id]/share`.
+- **Pomodoro analytics** — 14-day focus trend, streak, and best-day stats,
+  plus ambient sounds (rain, ocean, brown, white) synthesized with the
+  Web Audio API.
+- **Project portfolio** — `/dashboard/projects`: featured projects with tech
+  stack, status, dates, and links.
+
+---
 
 - **Approval is manual by design.** There is no email verification, so a campus
   admin is the gatekeeper. Set `ALLOWED_EMAIL_DOMAIN` to keep sign-ups on your
