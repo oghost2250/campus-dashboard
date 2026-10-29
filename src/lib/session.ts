@@ -1,0 +1,84 @@
+import "server-only";
+import { cache } from "react";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import type { UserRole, UserStatus } from "@prisma/client";
+
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
+import { LOCALE_COOKIE, defaultLocale, isLocale, type Locale } from "@/i18n/config";
+
+export async function getLocale(): Promise<Locale> {
+  const store = await cookies();
+  const value = store.get(LOCALE_COOKIE)?.value;
+  return isLocale(value) ? value : defaultLocale;
+}
+
+export type SessionUser = {
+  id: string;
+  name: string | null;
+  email: string;
+  image: string | null;
+  role: UserRole;
+  status: UserStatus;
+  approvedAt: Date | null;
+};
+
+/**
+ * The authoritative user record for this request, or null when signed out.
+ *
+ * Cached with React's `cache()` so a layout + page that both need the user only
+ * hit the database once. Role/status live in the database rather than the JWT,
+ * so an approval or suspension takes effect on the very next request.
+ */
+export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
+  const session = await auth();
+  const id = session?.user?.id;
+  if (!id) return null;
+
+  return prisma.user.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      image: true,
+      role: true,
+      status: true,
+      approvedAt: true,
+    },
+  });
+});
+
+/**
+ * Server components / pages: redirect unauthenticated visitors to /login.
+ * Middleware already blocks /dashboard, this is defence in depth for nested
+ * layouts and direct RSC requests.
+ *
+ * Pending and suspended accounts can sign in, but only get the /pending page
+ * until an admin activates them.
+ */
+export async function requireUser(): Promise<SessionUser> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    redirect("/login");
+  }
+
+  if (user.status !== "ACTIVE") {
+    redirect(user.status === "SUSPENDED" ? "/pending?state=suspended" : "/pending");
+  }
+
+  return user;
+}
+
+/** Pages and layouts that only admins may open. */
+export async function requireAdmin(): Promise<SessionUser> {
+  const user = await requireUser();
+
+  if (user.role !== "ADMIN") {
+    redirect("/dashboard");
+  }
+
+  return user;
+}

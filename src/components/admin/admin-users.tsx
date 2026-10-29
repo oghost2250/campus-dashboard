@@ -1,0 +1,760 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  CheckCircle2,
+  Clock3,
+  Loader2,
+  MoreHorizontal,
+  Plus,
+  Search,
+  ShieldCheck,
+  ShieldOff,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useI18n } from "@/i18n/provider";
+import { cn } from "@/lib/utils";
+import { formatDate } from "@/lib/format";
+import { computeAdminStats } from "@/lib/admin";
+import type { AdminUserDTO } from "@/lib/types";
+import type { UserRole, UserStatus } from "@prisma/client";
+
+type StatusFilter = "ALL" | UserStatus;
+type RoleFilter = "ALL" | UserRole;
+
+const emptyForm = {
+  name: "",
+  email: "",
+  password: "",
+  role: "USER" as UserRole,
+  status: "ACTIVE" as UserStatus,
+};
+
+function initials(user: AdminUserDTO) {
+  const source = user.name?.trim() || user.email;
+  const parts = source.split(/[\s@._-]+/).filter(Boolean);
+  return `${parts[0]?.[0] ?? "?"}${parts[1]?.[0] ?? ""}`
+    .toUpperCase()
+    .slice(0, 2);
+}
+
+function sortUsers(users: AdminUserDTO[]) {
+  const order: Record<UserStatus, number> = {
+    PENDING: 0,
+    ACTIVE: 1,
+    SUSPENDED: 2,
+  };
+  return [...users].sort(
+    (a, b) =>
+      order[a.status] - order[b.status] || b.createdAt.localeCompare(a.createdAt),
+  );
+}
+
+export function AdminUsers({
+  initialUsers,
+  currentUserId,
+}: {
+  initialUsers: AdminUserDTO[];
+  currentUserId: string;
+}) {
+  const { t, locale } = useI18n();
+
+  const [users, setUsers] = useState(initialUsers);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>("ALL");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUserDTO | null>(null);
+
+  useEffect(() => setUsers(initialUsers), [initialUsers]);
+
+  const stats = useMemo(() => computeAdminStats(users), [users]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return users.filter((user) => {
+      if (statusFilter !== "ALL" && user.status !== statusFilter) return false;
+      if (roleFilter !== "ALL" && user.role !== roleFilter) return false;
+      if (!needle) return true;
+      return `${user.name ?? ""} ${user.email}`.toLowerCase().includes(needle);
+    });
+  }, [users, query, statusFilter, roleFilter]);
+
+  const statusLabel: Record<UserStatus, string> = {
+    PENDING: t.admin.statusPending,
+    ACTIVE: t.admin.statusActive,
+    SUSPENDED: t.admin.statusSuspended,
+  };
+
+  const roleLabel: Record<UserRole, string> = {
+    USER: t.admin.roleUser,
+    ADMIN: t.admin.roleAdmin,
+  };
+
+  function errorMessage(code?: string) {
+    switch (code) {
+      case "LAST_ADMIN":
+        return t.admin.errorLastAdmin;
+      case "SELF_ROLE":
+      case "SELF_STATUS":
+      case "SELF_DELETE":
+        return t.admin.errorSelf;
+      case "EMAIL_TAKEN":
+        return t.admin.errorEmailTaken;
+      case "VALIDATION_ERROR":
+        return t.admin.errorValidation;
+      default:
+        return t.common.error;
+    }
+  }
+
+  function toastForPatch(user: AdminUserDTO, patch: Partial<AdminUserDTO>) {
+    if (patch.role === "ADMIN") return t.admin.promotedToast;
+    if (patch.role === "USER") return t.admin.demotedToast;
+    if (patch.status === "SUSPENDED") return t.admin.suspendedToast;
+    if (patch.status === "ACTIVE") {
+      return user.status === "SUSPENDED"
+        ? t.admin.reactivatedToast
+        : t.admin.approvedToast;
+    }
+    return t.common.saved;
+  }
+
+  async function patchUser(
+    user: AdminUserDTO,
+    patch: { status?: UserStatus; role?: UserRole },
+  ) {
+    setPendingId(user.id);
+    try {
+      const response = await fetch(`/api/admin/users/${user.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { user?: AdminUserDTO; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.user) {
+        throw new Error(payload?.error ?? "FAILED");
+      }
+
+      const updated = payload.user;
+      setUsers((current) =>
+        sortUsers(current.map((item) => (item.id === updated.id ? updated : item))),
+      );
+      toast.success(toastForPatch(user, patch));
+    } catch (error) {
+      toast.error(errorMessage(error instanceof Error ? error.message : undefined));
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function createUser(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+    setSaving(true);
+
+    try {
+      const response = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { user?: AdminUserDTO; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.user) {
+        setFormError(errorMessage(payload?.error));
+        return;
+      }
+
+      setUsers((current) => sortUsers([payload.user as AdminUserDTO, ...current]));
+      toast.success(t.admin.createdToast);
+      setCreateOpen(false);
+      setForm(emptyForm);
+    } catch {
+      setFormError(t.common.error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    setPendingId(target.id);
+
+    try {
+      const response = await fetch(`/api/admin/users/${target.id}`, {
+        method: "DELETE",
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { error?: string }
+        | null;
+
+      if (!response.ok) throw new Error(payload?.error ?? "FAILED");
+
+      setUsers((current) => current.filter((item) => item.id !== target.id));
+      toast.success(t.admin.deletedToast);
+    } catch (error) {
+      toast.error(errorMessage(error instanceof Error ? error.message : undefined));
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  const statCards = [
+    {
+      key: "total",
+      label: t.admin.statsTotal,
+      value: stats.total,
+      icon: Users,
+      tone: "text-foreground",
+      chip: "bg-muted text-muted-foreground",
+    },
+    {
+      key: "pending",
+      label: t.admin.statsPending,
+      value: stats.pending,
+      icon: Clock3,
+      tone: "text-warning",
+      chip: "bg-warning/12 text-warning",
+    },
+    {
+      key: "active",
+      label: t.admin.statsActive,
+      value: stats.active,
+      icon: CheckCircle2,
+      tone: "text-success",
+      chip: "bg-success/12 text-success",
+    },
+    {
+      key: "admins",
+      label: t.admin.statsAdmins,
+      value: stats.admins,
+      icon: ShieldCheck,
+      tone: "text-primary",
+      chip: "bg-primary/12 text-primary",
+    },
+  ] as const;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="grid size-9 place-items-center rounded-xl bg-primary/12 text-primary">
+              <ShieldCheck className="size-4.5" />
+            </span>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {t.admin.title}
+            </h1>
+          </div>
+          <p className="text-sm text-muted-foreground">{t.admin.subtitle}</p>
+        </div>
+
+        <Button
+          onClick={() => {
+            setForm(emptyForm);
+            setFormError(null);
+            setCreateOpen(true);
+          }}
+          className="h-9 shrink-0 rounded-xl"
+        >
+          <Plus className="size-4" />
+          {t.admin.createUser}
+        </Button>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {statCards.map((card) => (
+          <div
+            key={card.key}
+            className="rounded-xl border border-border/60 bg-card/70 p-4 shadow-soft backdrop-blur-xl"
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium text-muted-foreground">
+                {card.label}
+              </p>
+              <span className={cn("grid size-7 place-items-center rounded-lg", card.chip)}>
+                <card.icon className="size-3.5" />
+              </span>
+            </div>
+            <p className={cn("mt-2 text-2xl font-semibold tabular-nums", card.tone)}>
+              {card.value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-2xl border border-border/60 bg-card/70 shadow-soft backdrop-blur-xl">
+        <div className="flex flex-col gap-3 border-b border-border/60 p-4 lg:flex-row lg:items-center">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t.admin.searchPlaceholder}
+              className="h-9 rounded-lg ps-9"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <Select
+              value={statusFilter}
+              onValueChange={(value) => setStatusFilter(value as StatusFilter)}
+            >
+              <SelectTrigger className="h-9 w-[150px] rounded-lg">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t.admin.allStatuses}</SelectItem>
+                <SelectItem value="PENDING">{t.admin.statusPending}</SelectItem>
+                <SelectItem value="ACTIVE">{t.admin.statusActive}</SelectItem>
+                <SelectItem value="SUSPENDED">
+                  {t.admin.statusSuspended}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={roleFilter}
+              onValueChange={(value) => setRoleFilter(value as RoleFilter)}
+            >
+              <SelectTrigger className="h-9 w-[150px] rounded-lg">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">{t.admin.allRoles}</SelectItem>
+                <SelectItem value="USER">{t.admin.roleUser}</SelectItem>
+                <SelectItem value="ADMIN">{t.admin.roleAdmin}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+            <span className="grid size-11 place-items-center rounded-xl bg-muted text-muted-foreground">
+              <Users className="size-5" />
+            </span>
+            <p className="text-sm font-medium">
+              {users.length === 0 ? t.admin.empty : t.admin.emptyFiltered}
+            </p>
+            {stats.pending > 0 ? (
+              <p className="text-xs text-muted-foreground">{t.admin.pendingHint}</p>
+            ) : null}
+          </div>
+        ) : (
+          <ul className="divide-y divide-border/60">
+            <AnimatePresence initial={false}>
+              {filtered.map((user) => {
+                const isSelf = user.id === currentUserId;
+                const isAdmin = user.role === "ADMIN";
+
+                return (
+                  <motion.li
+                    key={user.id}
+                    layout
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="group flex flex-col gap-3 p-4 sm:flex-row sm:items-center"
+                  >
+                    <div className="flex min-w-0 flex-1 items-start gap-3">
+                      <Avatar className="mt-0.5 size-9 shrink-0">
+                        {user.image ? (
+                          <AvatarImage src={user.image} alt="" />
+                        ) : null}
+                        <AvatarFallback className="bg-primary/12 text-[11px] font-semibold text-primary">
+                          {initials(user)}
+                        </AvatarFallback>
+                      </Avatar>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="truncate text-sm font-medium">
+                            {user.name ?? user.email}
+                          </p>
+                          {isSelf ? (
+                            <Badge variant="secondary">{t.admin.you}</Badge>
+                          ) : null}
+                          <Badge variant={isAdmin ? "default" : "outline"}>
+                            {isAdmin ? (
+                              <ShieldCheck data-icon="inline-start" />
+                            ) : (
+                              <UserRound data-icon="inline-start" />
+                            )}
+                            {roleLabel[user.role]}
+                          </Badge>
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+                              user.status === "PENDING" &&
+                                "bg-warning/12 text-warning",
+                              user.status === "ACTIVE" &&
+                                "bg-success/12 text-success",
+                              user.status === "SUSPENDED" &&
+                                "bg-destructive/10 text-destructive",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "size-1.5 rounded-full",
+                                user.status === "PENDING" && "bg-warning",
+                                user.status === "ACTIVE" && "bg-success",
+                                user.status === "SUSPENDED" && "bg-destructive",
+                              )}
+                            />
+                            {statusLabel[user.status]}
+                          </span>
+                        </div>
+
+                        <p className="truncate text-xs text-muted-foreground">
+                          {user.email}
+                        </p>
+
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground/80">
+                          <span>
+                            {t.admin.joined}{" "}
+                            {formatDate(user.createdAt, locale, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </span>
+                          <span>
+                            {user.counts.tasks} {t.admin.countsTasks}
+                          </span>
+                          <span>
+                            {user.counts.courses} {t.admin.countsCourses}
+                          </span>
+                          <span>
+                            {user.counts.snippets} {t.admin.countsSnippets}
+                          </span>
+                          <span>
+                            {user.counts.notes} {t.admin.countsNotes}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2 sm:ps-3">
+                      {user.status === "PENDING" ? (
+                        <Button
+                          size="sm"
+                          onClick={() => patchUser(user, { status: "ACTIVE" })}
+                          disabled={pendingId === user.id}
+                          className="rounded-lg"
+                        >
+                          {pendingId === user.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="size-3.5" />
+                          )}
+                          {t.admin.approve}
+                        </Button>
+                      ) : null}
+
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="size-8 rounded-lg opacity-70 transition-opacity group-hover:opacity-100"
+                            aria-label={t.common.actions}
+                            disabled={pendingId === user.id}
+                          >
+                            {pendingId === user.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <MoreHorizontal className="size-4" />
+                            )}
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          {user.status === "SUSPENDED" ? (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() => patchUser(user, { status: "ACTIVE" })}
+                            >
+                              <CheckCircle2 className="size-4" />
+                              {t.admin.reactivate}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {user.status === "ACTIVE" && !isSelf ? (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() =>
+                                patchUser(user, { status: "SUSPENDED" })
+                              }
+                            >
+                              <ShieldOff className="size-4" />
+                              {t.admin.suspend}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {!isAdmin ? (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() => patchUser(user, { role: "ADMIN" })}
+                            >
+                              <ShieldCheck className="size-4" />
+                              {t.admin.makeAdmin}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {isAdmin && !isSelf ? (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() => patchUser(user, { role: "USER" })}
+                            >
+                              <UserRound className="size-4" />
+                              {t.admin.removeAdmin}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {isSelf ? (
+                            <DropdownMenuItem disabled>
+                              <UserRound className="size-4" />
+                              {t.admin.cannotEditSelf}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {!isSelf ? (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                variant="destructive"
+                                className="cursor-pointer"
+                                onClick={() => setDeleteTarget(user)}
+                              >
+                                <Trash2 className="size-4" />
+                                {t.admin.deleteUser}
+                              </DropdownMenuItem>
+                            </>
+                          ) : null}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </motion.li>
+                );
+              })}
+            </AnimatePresence>
+          </ul>
+        )}
+      </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t.admin.createTitle}</DialogTitle>
+            <DialogDescription>{t.admin.createSubtitle}</DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={createUser} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-name">{t.admin.name}</Label>
+              <Input
+                id="admin-name"
+                value={form.name}
+                onChange={(event) =>
+                  setForm((state) => ({ ...state, name: event.target.value }))
+                }
+                placeholder={t.admin.namePlaceholder}
+                required
+                autoFocus
+                className="h-10 rounded-xl"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-email">{t.admin.email}</Label>
+              <Input
+                id="admin-email"
+                type="email"
+                value={form.email}
+                onChange={(event) =>
+                  setForm((state) => ({ ...state, email: event.target.value }))
+                }
+                placeholder={t.admin.emailPlaceholder}
+                required
+                className="h-10 rounded-xl"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="admin-password">{t.admin.password}</Label>
+              <Input
+                id="admin-password"
+                type="password"
+                value={form.password}
+                onChange={(event) =>
+                  setForm((state) => ({ ...state, password: event.target.value }))
+                }
+                placeholder={t.auth.passwordPlaceholder}
+                required
+                minLength={8}
+                className="h-10 rounded-xl"
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>{t.admin.role}</Label>
+                <Select
+                  value={form.role}
+                  onValueChange={(value) =>
+                    setForm((state) => ({
+                      ...state,
+                      role: value as UserRole,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-10 w-full rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USER">{t.admin.roleUser}</SelectItem>
+                    <SelectItem value="ADMIN">{t.admin.roleAdmin}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>{t.admin.status}</Label>
+                <Select
+                  value={form.status}
+                  onValueChange={(value) =>
+                    setForm((state) => ({
+                      ...state,
+                      status: value as UserStatus,
+                    }))
+                  }
+                >
+                  <SelectTrigger className="h-10 w-full rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">{t.admin.statusActive}</SelectItem>
+                    <SelectItem value="PENDING">{t.admin.statusPending}</SelectItem>
+                    <SelectItem value="SUSPENDED">
+                      {t.admin.statusSuspended}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {formError ? (
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                {formError}
+              </p>
+            ) : null}
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(false)}
+                className="rounded-xl"
+              >
+                {t.common.cancel}
+              </Button>
+              <Button
+                type="submit"
+                disabled={saving}
+                className="rounded-xl"
+              >
+                {saving ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Plus className="size-4" />
+                )}
+                {t.admin.create}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t.admin.deleteTitle}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `${deleteTarget.name ?? deleteTarget.email} — ${t.admin.deleteBody}`
+                : t.admin.deleteBody}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className="bg-destructive/10 text-destructive hover:bg-destructive/20"
+            >
+              {t.common.delete}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

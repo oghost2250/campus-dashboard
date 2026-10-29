@@ -1,0 +1,241 @@
+// ---------------------------------------------------------------------------
+// Multi-Tenant Student & Developer Dashboard
+// Prisma 6.x / PostgreSQL
+//
+// Tenancy rule: every user-owned table carries a non-nullable `userId` with a
+// cascading FK. Every query in the app layer is scoped by the authenticated
+// session's user id — see src/lib/dal/*.ts. No client component ever receives
+// another user's rows.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth (NextAuth v5 / Auth.js — field names are dictated by @auth/prisma-adapter)
+// ---------------------------------------------------------------------------
+
+/// Admin = can verify/manage accounts. User = regular student workspace.
+enum UserRole {
+  USER
+  ADMIN
+}
+
+/// New accounts start PENDING and wait for an admin to approve them.
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+}
+
+model User {
+  id            String     @id @default(cuid())
+  name          String?
+  email         String     @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String? // null for OAuth-only accounts
+  locale        String     @default("en") // "en" | "ar"
+  role          UserRole   @default(USER)
+  status        UserStatus @default(PENDING)
+  approvedAt    DateTime? // set when an admin first activates the account
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  accounts  Account[]
+  sessions  Session[]
+  tasks     Task[]
+  snippets  Snippet[]
+  courses   Course[]
+  notes     Note[]
+  pomodoros PomodoroSession[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Academic zone
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  title       String
+  description String?      @db.Text
+  subject     String       @default("General")
+  status      TaskStatus   @default(TODO)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Primary access pattern: "my tasks, soonest first, optionally filtered by status".
+  @@index([userId, status, dueDate])
+  @@index([userId, updatedAt])
+  @@map("tasks")
+}
+
+enum AssessmentType {
+  QUIZ
+  ASSIGNMENT
+  LAB
+  MIDTERM
+  FINAL
+  PROJECT
+  OTHER
+}
+
+model Course {
+  id          String   @id @default(cuid())
+  name        String
+  code        String?
+  credits     Int      @default(3)
+  targetGrade String? // letter the student is aiming for, e.g. "A"
+  color       String   @default("#6366f1") // accent used in the UI
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  assessments Assessment[]
+
+  @@index([userId])
+  @@map("courses")
+}
+
+model Assessment {
+  id        String         @id @default(cuid())
+  name      String
+  type      AssessmentType @default(OTHER)
+  weight    Float // percentage of the course total, 0-100
+  score     Float? // points earned so far
+  maxScore  Float?         @default(100)
+  dueDate   DateTime?
+  createdAt DateTime       @default(now())
+
+  courseId String
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@index([courseId])
+  @@map("assessments")
+}
+
+// ---------------------------------------------------------------------------
+// Developer zone
+// ---------------------------------------------------------------------------
+
+model Snippet {
+  id         String   @id @default(cuid())
+  title      String
+  code       String   @db.Text
+  language   String   @default("typescript")
+  tags       String[] @default([])
+  isFavorite Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@index([userId, language])
+  @@map("snippets")
+}
+
+// ---------------------------------------------------------------------------
+// Productivity
+// ---------------------------------------------------------------------------
+
+model Note {
+  id        String   @id @default(cuid())
+  title     String   @default("Untitled note")
+  content   String   @default("") @db.Text
+  isPinned  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, updatedAt])
+  @@map("notes")
+}
+
+model PomodoroSession {
+  id              String    @id @default(cuid())
+  label           String    @default("Focus")
+  durationMinutes Int
+  wasCompleted    Boolean   @default(true)
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startedAt])
+  @@map("pomodoro_sessions")
+}
