@@ -17,6 +17,11 @@ export const authConfig = {
   callbacks: {
     /**
      * Runs in middleware. Returning false makes Auth.js redirect to `signIn`.
+     *
+     * Auth pages are always allowed through. They do their own database-backed
+     * redirect when a *live* user is signed in. Redirecting from here on JWT
+     * presence alone would trap accounts whose user row was deleted (e.g. by an
+     * admin or a reseed): /login → /dashboard → /login, forever.
      */
     authorized({ auth, request: { nextUrl } }) {
       const isLoggedIn = Boolean(auth?.user);
@@ -26,9 +31,6 @@ export const authConfig = {
         pathname === "/login" || pathname === "/register";
 
       if (isAuthPage) {
-        if (isLoggedIn) {
-          return Response.redirect(new URL("/dashboard", nextUrl));
-        }
         return true;
       }
 
