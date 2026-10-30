@@ -57,6 +57,29 @@ export async function POST(request: Request) {
       })),
     });
 
+    // Attempt automatic Moodle SSO handshake using the signup credentials.
+    const moodleUrl = "https://moodle.zewailcity.edu.eg";
+    try {
+      const tokenResponse = await fetch(`${moodleUrl}/login/token.php`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          username: email,
+          password,
+          service: "moodle_mobile_app",
+        }).toString(),
+      });
+      const tokenData = await tokenResponse.json().catch(() => null);
+      if (tokenData?.token) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { moodleToken: tokenData.token, moodleUrl },
+        });
+      }
+    } catch {
+      // Moodle may be unreachable or credentials invalid; signup still succeeds.
+    }
+
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {
     // Unique constraint on email — do not leak whether the address exists.

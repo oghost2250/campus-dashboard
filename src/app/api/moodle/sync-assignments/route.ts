@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { prisma } from "@/lib/prisma";
 import { requireUserId, unauthorized } from "@/lib/api";
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
 
@@ -15,48 +16,41 @@ type MoodleCourse = {
   assignments?: MoodleAssignment[];
 };
 
-export async function GET() {
-  const userId = await requireUserId();
-  if (!userId) return unauthorized();
+async function fetchFromMoodle(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user?.moodleToken) return null;
 
-  const moodleUrl = process.env.MOODLE_URL;
-  const moodleToken = process.env.MOODLE_TOKEN;
+  const baseUrl = user.moodleUrl ?? "https://moodle.zewailcity.edu.eg";
+  const token = user.moodleToken;
 
-  // If Moodle is connected, attempt a live sync. Otherwise fall back to the
-  // Subjects First Year presets so the dashboard is never empty.
-  if (moodleUrl && moodleToken) {
-    try {
-      const url = new URL(`${moodleUrl}/webservice/rest/server.php`);
-      url.searchParams.set("wstoken", moodleToken);
-      url.searchParams.set("wsfunction", "mod_assign_get_assignments");
-      url.searchParams.set("moodlewsrestformat", "json");
+  try {
+    const url = new URL(`${baseUrl}/webservice/rest/server.php`);
+    url.searchParams.set("wstoken", token);
+    url.searchParams.set("wsfunction", "mod_assign_get_assignments");
+    url.searchParams.set("moodlewsrestformat", "json");
 
-      const response = await fetch(url.toString());
-      const data = await response.json().catch(() => null);
-      const courses = (data?.courses ?? []) as MoodleCourse[];
+    const response = await fetch(url.toString());
+    const data = await response.json().catch(() => null);
+    const courses = (data?.courses ?? []) as MoodleCourse[];
 
-      const assignments = courses.flatMap((course) =>
-        (course.assignments ?? []).map((assignment) => ({
-          id: String(assignment.id),
-          title: assignment.name,
-          course: course.fullname ?? course.shortname,
-          dueDate: assignment.duedate
-            ? new Date(assignment.duedate * 1000).toISOString()
-            : new Date(Date.now() + 7 * 86400000).toISOString(),
-          moodleAssignmentId: String(assignment.id),
-        })),
-      );
-
-      if (assignments.length > 0) {
-        return NextResponse.json({ assignments, source: "moodle" });
-      }
-    } catch (error) {
-      console.error("Moodle sync failed:", error);
-    }
+    return courses.flatMap((course) =>
+      (course.assignments ?? []).map((assignment) => ({
+        id: String(assignment.id),
+        title: assignment.name,
+        course: course.fullname ?? course.shortname ?? "Course",
+        dueDate: assignment.duedate
+          ? new Date(assignment.duedate * 1000).toISOString()
+          : new Date(Date.now() + 7 * 86400000).toISOString(),
+        moodleAssignmentId: String(assignment.id),
+      })),
+    );
+  } catch {
+    return null;
   }
+}
 
-  // Fallback: Subjects First Year presets with staggered due dates.
-  const assignments = FIRST_YEAR_SUBJECTS.map((subject, index) => ({
+function fallbackAssignments() {
+  return FIRST_YEAR_SUBJECTS.map((subject, index) => ({
     id: `preset-${index + 1}`,
     title: `${subject.code} - Assignment ${index + 1}`,
     course: `${subject.code} - ${subject.title}`,
@@ -65,6 +59,28 @@ export async function GET() {
     ).toISOString(),
     moodleAssignmentId: `mdl-${1000 + index}`,
   }));
+}
 
-  return NextResponse.json({ assignments, source: "presets" });
+export async function GET() {
+  const userId = await requireUserId();
+  if (!userId) return unauthorized();
+
+  const moodleAssignments = await fetchFromMoodle(userId);
+  if (moodleAssignments?.length) {
+    return NextResponse.json({ assignments: moodleAssignments, source: "moodle" });
+  }
+
+  return NextResponse.json({ assignments: fallbackAssignments(), source: "presets" });
+}
+
+export async function POST() {
+  const userId = await requireUserId();
+  if (!userId) return unauthorized();
+
+  const moodleAssignments = await fetchFromMoodle(userId);
+  if (moodleAssignments?.length) {
+    return NextResponse.json({ assignments: moodleAssignments, source: "moodle" });
+  }
+
+  return NextResponse.json({ assignments: fallbackAssignments(), source: "presets" });
 }

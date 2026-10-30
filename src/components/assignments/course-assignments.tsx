@@ -5,6 +5,7 @@ import { Camera, CheckCircle2, Clock, Plus, X } from "lucide-react";
 import { jsPDF } from "jspdf";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
+import { cn } from "@/lib/utils";
 
 type Status = "pending" | "scanned" | "submitted";
 
@@ -44,8 +45,8 @@ function formatDate(date: string): string {
 export function CourseAssignments() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loadingAssignments, setLoadingAssignments] = useState(true);
-  const [moodleUrl, setMoodleUrl] = useState("");
-  const [moodleToken, setMoodleToken] = useState("");
+  const [moodleToken, setMoodleToken] = useState<string | null>(null);
+  const [moodleEmail, setMoodleEmail] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -66,13 +67,28 @@ export function CourseAssignments() {
     let cancelled = false;
     async function load() {
       try {
-        const response = await fetch("/api/moodle/sync-assignments");
-        if (!response.ok) throw new Error("sync failed");
-        const data = (await response.json()) as { assignments?: Assignment[] };
-        if (!cancelled && data.assignments) {
-          setAssignments(
-            data.assignments.map((item) => ({ ...item, status: "pending" })),
-          );
+        const [assignmentsRes, moodleRes] = await Promise.all([
+          fetch("/api/moodle/sync-assignments"),
+          fetch("/api/moodle/me"),
+        ]);
+        const assignmentsData = (await assignmentsRes.json()) as {
+          assignments?: Assignment[];
+        };
+        const moodleData = (await moodleRes.json()) as {
+          email?: string | null;
+          moodleToken?: string | null;
+        };
+        if (!cancelled) {
+          setMoodleToken(moodleData.moodleToken ?? null);
+          setMoodleEmail(moodleData.email ?? null);
+          if (assignmentsData.assignments) {
+            setAssignments(
+              assignmentsData.assignments.map((item) => ({
+                ...item,
+                status: "pending",
+              })),
+            );
+          }
         }
       } catch {
         if (!cancelled) setAssignments(INITIAL_ASSIGNMENTS);
@@ -85,6 +101,24 @@ export function CourseAssignments() {
       cancelled = true;
     };
   }, []);
+
+  async function syncNow() {
+    setConnectionStatus("Syncing…");
+    try {
+      const response = await fetch("/api/moodle/sync-assignments", {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("sync failed");
+      const data = (await response.json()) as { assignments?: Assignment[] };
+      setConnectionStatus("Synced");
+      setAssignments(
+        (data.assignments ?? []).map((item) => ({ ...item, status: "pending" })),
+      );
+      setTimeout(() => setConnectionStatus(null), 1500);
+    } catch {
+      setConnectionStatus("Sync failed");
+    }
+  }
 
   useEffect(() => {
     if (!modalOpen) {
@@ -274,54 +308,68 @@ export function CourseAssignments() {
         </p>
       </div>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-        <h3 className="mb-2 text-xs font-semibold text-gray-200">
-          Moodle connection
-        </h3>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <input
-            type="url"
-            value={moodleUrl}
-            onChange={(event) => setMoodleUrl(event.target.value)}
-            placeholder="https://moodle.zewailcity.edu.eg"
-            className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-xs text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
-          />
-          <input
-            type="password"
-            value={moodleToken}
-            onChange={(event) => setMoodleToken(event.target.value)}
-            placeholder="Moodle web service token"
-            className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-xs text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
-          />
+      <div
+        className={cn(
+          "rounded-xl border border-zinc-800 bg-zinc-900/60 p-4",
+          moodleToken ? "border-emerald-500/30 bg-emerald-500/5" : "border-zinc-700",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              className={`text-[10px] font-medium ${
+                moodleToken ? "text-emerald-400" : "text-rose-400"
+              }`}
+            >
+              {moodleToken ? "🟢" : "🔴"}
+            </span>
+            <h3 className="text-xs font-semibold text-gray-200">
+              Moodle auto-connection
+            </h3>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {moodleToken ? (
+              <>
+                <span className="text-[10px] text-gray-400">
+                  Moodle Auto-Connected ({moodleEmail})
+                </span>
+                <button
+                  type="button"
+                  onClick={syncNow}
+                  disabled={connectionStatus === "Syncing…"}
+                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500 disabled:opacity-50"
+                >
+                  Sync Now
+                </button>
+              </>
+)
+: (
+                <>
+                  <span className="text-[10px] text-gray-400">
+                    Moodle token not available
+                  </span>
+                  <button
+                    type="button"
+                    onClick={syncNow}
+                    className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-rose-500 disabled:opacity-50"
+                    disabled
+                  >
+                    Re-verify Moodle Password
+                  </button>
+                </>
+              )}
+          </div>
         </div>
-        <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={async () => {
-              setConnectionStatus(null);
-              try {
-                const response = await fetch("/api/moodle/connect", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    moodleUrl,
-                    moodleToken,
-                  }),
-                });
-                if (!response.ok) throw new Error("connect failed");
-                setConnectionStatus("Connected");
-              } catch {
-                setConnectionStatus("Failed");
-              }
-            }}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
-          >
-            Save connection
-          </button>
-          {connectionStatus && (
-            <span className="text-[11px] text-gray-400">{connectionStatus}</span>
-          )}
-        </div>
+        {connectionStatus && connectionStatus !== null && (
+          <p className="mt-1 text-[10px] font-medium">
+            {connectionStatus === "Synced"
+              ? "Assignments synced"
+              : connectionStatus === "Sync failed"
+                ? "Sync failed — try again"
+                : connectionStatus}
+          </p>
+        )}
       </div>
 
       {loadingAssignments ? (
