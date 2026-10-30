@@ -42,7 +42,11 @@ function formatDate(date: string): string {
 }
 
 export function CourseAssignments() {
-  const [assignments, setAssignments] = useState<Assignment[]>(INITIAL_ASSIGNMENTS);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [loadingAssignments, setLoadingAssignments] = useState(true);
+  const [moodleUrl, setMoodleUrl] = useState("");
+  const [moodleToken, setMoodleToken] = useState("");
+  const [connectionStatus, setConnectionStatus] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [pages, setPages] = useState<string[]>([]);
@@ -57,6 +61,30 @@ export function CourseAssignments() {
   const streamRef = useRef<MediaStream | null>(null);
 
   const activeAssignment = assignments.find((item) => item.id === activeId) ?? null;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const response = await fetch("/api/moodle/sync-assignments");
+        if (!response.ok) throw new Error("sync failed");
+        const data = (await response.json()) as { assignments?: Assignment[] };
+        if (!cancelled && data.assignments) {
+          setAssignments(
+            data.assignments.map((item) => ({ ...item, status: "pending" })),
+          );
+        }
+      } catch {
+        if (!cancelled) setAssignments(INITIAL_ASSIGNMENTS);
+      } finally {
+        if (!cancelled) setLoadingAssignments(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!modalOpen) {
@@ -246,7 +274,60 @@ export function CourseAssignments() {
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <h3 className="mb-2 text-xs font-semibold text-gray-200">
+          Moodle connection
+        </h3>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input
+            type="url"
+            value={moodleUrl}
+            onChange={(event) => setMoodleUrl(event.target.value)}
+            placeholder="https://moodle.zewailcity.edu.eg"
+            className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-xs text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
+          />
+          <input
+            type="password"
+            value={moodleToken}
+            onChange={(event) => setMoodleToken(event.target.value)}
+            placeholder="Moodle web service token"
+            className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-xs text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
+          />
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              setConnectionStatus(null);
+              try {
+                const response = await fetch("/api/moodle/connect", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    moodleUrl,
+                    moodleToken,
+                  }),
+                });
+                if (!response.ok) throw new Error("connect failed");
+                setConnectionStatus("Connected");
+              } catch {
+                setConnectionStatus("Failed");
+              }
+            }}
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
+          >
+            Save connection
+          </button>
+          {connectionStatus && (
+            <span className="text-[11px] text-gray-400">{connectionStatus}</span>
+          )}
+        </div>
+      </div>
+
+      {loadingAssignments ? (
+        <p className="text-xs text-gray-500">Loading assignments…</p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {assignments.map((assignment) => {
           const remaining = daysUntil(assignment.dueDate);
           return (
@@ -298,6 +379,7 @@ export function CourseAssignments() {
           );
         })}
       </div>
+      )}
 
       {/* Scanner modal */}
       {modalOpen && activeAssignment && (
@@ -399,6 +481,38 @@ export function CourseAssignments() {
                       >
                         <X className="size-3" />
                       </button>
+                      {index > 0 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPages((current) => {
+                              const next = [...current];
+                              [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                              return next;
+                            })
+                          }
+                          className="absolute bottom-0.5 left-0.5 rounded bg-black/70 px-1 text-[8px] text-gray-300 hover:text-white"
+                          aria-label="Move page up"
+                        >
+                          ←
+                        </button>
+                      )}
+                      {index < pages.length - 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPages((current) => {
+                              const next = [...current];
+                              [next[index + 1], next[index]] = [next[index], next[index + 1]];
+                              return next;
+                            })
+                          }
+                          className="absolute bottom-0.5 right-0.5 rounded bg-black/70 px-1 text-[8px] text-gray-300 hover:text-white"
+                          aria-label="Move page down"
+                        >
+                          →
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>

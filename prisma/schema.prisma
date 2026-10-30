@@ -59,6 +59,8 @@ model User {
   syllabusTopics SyllabusTopic[]
   projects       Project[]
   submissions    AssignmentSubmission[]
+  moodleToken    String?
+  moodleUrl      String?
 
   @@map("users")
 }

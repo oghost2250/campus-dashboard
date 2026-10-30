@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
 import { registerSchema } from "@/lib/validations/auth";
+import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
 
 export async function POST(request: Request) {
   let payload: unknown;
@@ -43,6 +44,17 @@ export async function POST(request: Request) {
     const user = await prisma.user.create({
       data: { name, email, passwordHash },
       select: { id: true, email: true, name: true },
+    });
+
+    // Auto-attach Subjects First Year courses to the new student profile.
+    await prisma.course.createMany({
+      data: FIRST_YEAR_SUBJECTS.map((subject, index) => ({
+        name: subject.title,
+        code: subject.code,
+        credits: 3,
+        color: ["#6366f1", "#0ea5e9", "#10b981", "#f59e0b", "#ec4899", "#8b5cf6"][index % 6],
+        userId: user.id,
+      })),
     });
 
     return NextResponse.json({ user }, { status: 201 });

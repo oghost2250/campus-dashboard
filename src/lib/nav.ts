@@ -7,7 +7,6 @@ import {
   FolderGit2,
   LayoutDashboard,
   Library,
-  ListChecks,
   NotebookPen,
   ShieldCheck,
   Timer,
@@ -56,7 +55,6 @@ export const navGroups: NavGroup[] = [
   {
     id: "academic",
     items: [
-      { href: "/dashboard/tasks", id: "tasks", icon: ListChecks },
       { href: "/dashboard/assignments", id: "assignments", icon: ClipboardList },
       { href: "/dashboard/gpa", id: "gpa", icon: Calculator },
       { href: "/dashboard/syllabus", id: "syllabus", icon: BookOpenCheck },
