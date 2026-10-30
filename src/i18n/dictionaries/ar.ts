@@ -40,7 +40,7 @@ export const ar: Dictionary = {
   },
   nav: {
     dashboard: "لوحة التحكم",
-    tasks: "الواجبات",
+    tasks: "قائمة المهام",
     assignments: "واجبات المقررات",
     gpa: "حاسبة المعدل",
     snippets: "المقتطفات",

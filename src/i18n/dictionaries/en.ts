@@ -43,7 +43,7 @@ export const en = {
   },
   nav: {
     dashboard: "Dashboard",
-    tasks: "Assignments",
+    tasks: "To-do list",
     assignments: "Course assignments",
     gpa: "GPA calculator",
     snippets: "Snippets",
