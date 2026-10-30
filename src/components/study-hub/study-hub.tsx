@@ -1,14 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, FileText, Image as ImageIcon, Plus, X } from "lucide-react";
+import { Camera, FileText, Globe, Image as ImageIcon, Lock, Plus, Trash2, X } from "lucide-react";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
-import {
-  downscaleImage,
-  loadPersisted,
-  savePersisted,
-} from "@/lib/browser-store";
+import { downscaleImage } from "@/lib/browser-store";
+import type { StudyMaterialDTO } from "@/lib/types";
 
 type Privacy = "private" | "public";
 type Category = "Lecture Notes" | "Past Exam" | "Summary" | "Assignment";
@@ -22,51 +19,32 @@ type Material = {
   fileType: string;
   owner: string;
   createdAt: number;
+  isOwner: boolean;
 };
 
-const CURRENT_USER = "You";
-
-const SEED_MATERIALS: Material[] = [
-  {
-    id: "seed-1",
-    title: "Digital Logic - Lecture 3 (Combinational Circuits)",
-    course: "CSAI 112 - Digital Logic",
-    category: "Lecture Notes",
-    privacy: "public",
-    fileData:
-      "https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=900",
-    fileType: "image/jpeg",
-    owner: "Layla H.",
-    createdAt: Date.now() - 86400000 * 3,
-  },
-  {
-    id: "seed-2",
-    title: "Calculus Midterm 2024 (Solved)",
-    course: "MATH 103 - Calculus for Computing",
-    category: "Past Exam",
-    privacy: "public",
-    fileData:
-      "https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=900",
-    fileType: "image/jpeg",
-    owner: "Omar T.",
-    createdAt: Date.now() - 86400000 * 5,
-  },
-];
-
-const CATEGORIES: Category[] = [
-  "Lecture Notes",
-  "Past Exam",
-  "Summary",
-  "Assignment",
-];
+const CATEGORIES: Category[] = ["Lecture Notes", "Past Exam", "Summary", "Assignment"];
 
 function isImage(type: string) {
   return type.startsWith("image/");
 }
 
-export function StudyHub({ userId }: { userId: string }) {
-  const STORAGE_KEY = `campus-study-hub:${userId}`;
-  const [materials, setMaterials] = useState<Material[]>(SEED_MATERIALS);
+function dtoToMaterial(dto: StudyMaterialDTO): Material {
+  return {
+    id: dto.id,
+    title: dto.title,
+    course: dto.course,
+    category: dto.category as Category,
+    privacy: dto.privacy,
+    fileData: dto.fileData,
+    fileType: dto.fileType,
+    owner: dto.owner,
+    createdAt: new Date(dto.createdAt).getTime(),
+    isOwner: dto.isOwner,
+  };
+}
+
+export function StudyHub() {
+  const [materials, setMaterials] = useState<Material[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<string>(
     FIRST_YEAR_SUBJECTS[0].code + " - " + FIRST_YEAR_SUBJECTS[0].title,
   );
@@ -85,41 +63,67 @@ export function StudyHub({ userId }: { userId: string }) {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<Material | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Load persisted uploads from IndexedDB (migrates legacy localStorage).
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const parsed = await loadPersisted<Material[]>(STORAGE_KEY);
-      if (!cancelled && Array.isArray(parsed)) {
-        setMaterials([...SEED_MATERIALS, ...parsed]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [STORAGE_KEY]);
-  // Persist user uploads (debounced so scans do not rewrite on every render).
-  useEffect(() => {
-    const userUploads = materials.filter(
-      (material) => !SEED_MATERIALS.some((seed) => seed.id === material.id),
-    );
+  async function loadMaterials() {
+    setLoading(true);
+    try {
+      const [vaultRes, communityRes] = await Promise.all([
+        fetch("/api/study-materials?scope=vault", { cache: "no-store" }),
+        fetch("/api/study-materials?scope=community", { cache: "no-store" }),
+      ]);
+      if (!vaultRes.ok || !communityRes.ok) throw new Error("LOAD_FAILED");
+      const vaultJson = (await vaultRes.json()) as { materials: StudyMaterialDTO[] };
+      const communityJson = (await communityRes.json()) as { materials: StudyMaterialDTO[] };
 
-    const timer = window.setTimeout(async () => {
-      const saved = await savePersisted(STORAGE_KEY, userUploads);
-      if (!saved) {
-        setError(
-          "Local storage is full. Remove a few saved materials to free space.",
-        );
+      const merged = new Map<string, Material>();
+      for (const dto of [...vaultJson.materials, ...communityJson.materials]) {
+        merged.set(dto.id, dtoToMaterial(dto));
       }
-    }, 400);
+      setMaterials(Array.from(merged.values()));
+      setError(null);
+    } catch {
+      setError("Could not load materials. Showing cached data if available.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-    return () => window.clearTimeout(timer);
-  }, [materials, STORAGE_KEY]);
+  useEffect(() => {
+    void loadMaterials();
+  }, []);
+
+  async function togglePrivacy(material: Material) {
+    const next: Privacy = material.privacy === "public" ? "private" : "public";
+    try {
+      const res = await fetch(`/api/study-materials/${material.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ privacy: next }),
+      });
+      if (!res.ok) throw new Error("UPDATE_FAILED");
+      setMaterials((current) =>
+        current.map((m) => (m.id === material.id ? { ...m, privacy: next } : m)),
+      );
+    } catch {
+      setError("Could not update privacy.");
+    }
+  }
+
+  async function deleteMaterial(material: Material) {
+    if (!window.confirm("Delete this material?")) return;
+    try {
+      const res = await fetch(`/api/study-materials/${material.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("DELETE_FAILED");
+      setMaterials((current) => current.filter((m) => m.id !== material.id));
+    } catch {
+      setError("Could not delete material.");
+    }
+  }
 
   // Camera lifecycle
   useEffect(() => {
@@ -145,9 +149,7 @@ export function StudyHub({ userId }: { userId: string }) {
       setCameraActive(true);
     } catch (err) {
       setCameraError(
-        err instanceof Error
-          ? err.message
-          : "Camera access denied or unavailable.",
+        err instanceof Error ? err.message : "Camera access denied or unavailable.",
       );
       setCameraActive(false);
     }
@@ -184,9 +186,7 @@ export function StudyHub({ userId }: { userId: string }) {
     const reader = new FileReader();
     reader.onload = async () => {
       const raw = reader.result as string;
-      const data = file.type.startsWith("image/")
-        ? await downscaleImage(raw)
-        : raw;
+      const data = file.type.startsWith("image/") ? await downscaleImage(raw) : raw;
       setFileData(data);
       setFileType(file.type || "application/octet-stream");
       setError(null);
@@ -224,7 +224,7 @@ export function StudyHub({ userId }: { userId: string }) {
     setModalOpen(true);
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.title.trim()) {
       setError("Title is required.");
@@ -235,43 +235,40 @@ export function StudyHub({ userId }: { userId: string }) {
       return;
     }
 
-    const material: Material = {
-      id: `mat-${Date.now()}`,
-      title: form.title.trim(),
-      course: form.course,
-      category: form.category,
-      privacy: form.privacy,
-      fileData,
-      fileType,
-      owner: CURRENT_USER,
-      createdAt: Date.now(),
-    };
-
-    setMaterials((current) => [material, ...current]);
-    resetModal();
+    try {
+      const res = await fetch("/api/study-materials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: form.title.trim(),
+          course: form.course,
+          category: form.category,
+          privacy: form.privacy,
+          fileData,
+          fileType: fileType || "application/octet-stream",
+        }),
+      });
+      if (!res.ok) throw new Error("CREATE_FAILED");
+      const json = (await res.json()) as { material: StudyMaterialDTO };
+      setMaterials((current) => [dtoToMaterial(json.material), ...current]);
+      resetModal();
+    } catch {
+      setError("Could not save material.");
+    }
   }
 
-  const courseMaterials = materials.filter(
-    (material) => material.course === selectedCourse,
-  );
+  const courseMaterials = materials.filter((m) => m.course === selectedCourse);
 
-  const vaultMaterials = courseMaterials.filter(
-    (material) => material.owner === CURRENT_USER,
-  );
-  const communityMaterials = courseMaterials.filter(
-    (material) => material.privacy === "public",
-  );
+  const vaultMaterials = courseMaterials.filter((m) => m.isOwner);
+  const communityMaterials = courseMaterials.filter((m) => m.privacy === "public");
 
-  const visibleMaterials =
-    tab === "vault" ? vaultMaterials : communityMaterials;
+  const visibleMaterials = tab === "vault" ? vaultMaterials : communityMaterials;
 
   return (
     <div className="w-full space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight text-gray-200">
-            Study Hub
-          </h2>
+          <h2 className="text-sm font-semibold tracking-tight text-gray-200">Study Hub</h2>
           <p className="text-[11px] text-gray-500">
             Upload notes, scan documents, and share with your course.
           </p>
@@ -321,9 +318,7 @@ export function StudyHub({ userId }: { userId: string }) {
             onClick={() => setTab(item.id as "vault" | "community")}
             className={[
               "flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-              tab === item.id
-                ? "bg-zinc-800 text-white"
-                : "text-gray-400 hover:text-gray-200",
+              tab === item.id ? "bg-zinc-800 text-white" : "text-gray-400 hover:text-gray-200",
             ].join(" ")}
           >
             {item.label}
@@ -331,8 +326,18 @@ export function StudyHub({ userId }: { userId: string }) {
         ))}
       </div>
 
+      {error && (
+        <p className="text-[11px] text-rose-400" role="alert">
+          {error}
+        </p>
+      )}
+
       {/* Materials grid */}
-      {visibleMaterials.length === 0 ? (
+      {loading ? (
+        <div className="flex items-center justify-center py-12 text-xs text-gray-500">
+          Loading…
+        </div>
+      ) : visibleMaterials.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/40 px-6 py-12 text-center">
           <FileText className="size-5 text-gray-500" />
           <p className="text-xs text-gray-500">
@@ -344,45 +349,74 @@ export function StudyHub({ userId }: { userId: string }) {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {visibleMaterials.map((material) => (
-            <button
+            <div
               key={material.id}
-              type="button"
-              onClick={() => setViewing(material)}
               className="group flex flex-col overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/70 text-left transition-colors hover:border-indigo-500/40"
             >
-              <div className="relative h-32 w-full overflow-hidden bg-zinc-950">
-                {isImage(material.fileType) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={material.fileData}
-                    alt={material.title}
-                    className="h-full w-full object-cover transition-transform group-hover:scale-105"
-                  />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center">
-                    <FileText className="size-8 text-gray-600" />
-                  </div>
-                )}
-                <span
-                  className={[
-                    "absolute right-2 top-2 rounded-md px-1.5 py-0.5 text-[9px] font-medium",
-                    material.privacy === "public"
-                      ? "bg-emerald-500/20 text-emerald-300"
-                      : "bg-zinc-700/80 text-gray-300",
-                  ].join(" ")}
-                >
-                  {material.privacy === "public" ? "Public" : "Private"}
-                </span>
-              </div>
-              <div className="space-y-1 p-3">
-                <p className="truncate text-xs font-medium text-gray-200">
-                  {material.title}
-                </p>
-                <p className="truncate text-[10px] text-gray-500">
-                  {material.category} · {material.owner}
-                </p>
-              </div>
-            </button>
+              <button
+                type="button"
+                onClick={() => setViewing(material)}
+                className="flex flex-1 flex-col"
+              >
+                <div className="relative h-32 w-full overflow-hidden bg-zinc-950">
+                  {isImage(material.fileType) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={material.fileData}
+                      alt={material.title}
+                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <FileText className="size-8 text-gray-600" />
+                    </div>
+                  )}
+                  <span
+                    className={[
+                      "absolute right-2 top-2 rounded-md px-1.5 py-0.5 text-[9px] font-medium",
+                      material.privacy === "public"
+                        ? "bg-emerald-500/20 text-emerald-300"
+                        : "bg-zinc-700/80 text-gray-300",
+                    ].join(" ")}
+                  >
+                    {material.privacy === "public" ? "Public" : "Private"}
+                  </span>
+                </div>
+                <div className="space-y-1 p-3">
+                  <p className="truncate text-xs font-medium text-gray-200">{material.title}</p>
+                  <p className="truncate text-[10px] text-gray-500">
+                    {material.category} · {material.owner}
+                  </p>
+                </div>
+              </button>
+
+              {material.isOwner && (
+                <div className="flex items-center justify-between gap-2 border-t border-zinc-800 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => togglePrivacy(material)}
+                    className="inline-flex items-center gap-1 text-[10px] text-gray-400 transition-colors hover:text-gray-200"
+                  >
+                    {material.privacy === "public" ? (
+                      <>
+                        <Lock className="size-3" /> Make private
+                      </>
+                    ) : (
+                      <>
+                        <Globe className="size-3" /> Share
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => deleteMaterial(material)}
+                    className="inline-flex items-center gap-1 text-[10px] text-rose-400 transition-colors hover:text-rose-300"
+                  >
+                    <Trash2 className="size-3" /> Delete
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -392,9 +426,7 @@ export function StudyHub({ userId }: { userId: string }) {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
           <div className="w-full max-w-lg rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-gray-200">
-                Add study material
-              </h3>
+              <h3 className="text-sm font-semibold text-gray-200">Add study material</h3>
               <button
                 type="button"
                 onClick={resetModal}
@@ -419,9 +451,7 @@ export function StudyHub({ userId }: { userId: string }) {
                     onClick={() => setMode(item.id as "upload" | "camera")}
                     className={[
                       "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                      mode === item.id
-                        ? "bg-zinc-800 text-white"
-                        : "text-gray-400 hover:text-gray-200",
+                      mode === item.id ? "bg-zinc-800 text-white" : "text-gray-400 hover:text-gray-200",
                     ].join(" ")}
                   >
                     <Icon className="size-3.5" />
@@ -433,15 +463,11 @@ export function StudyHub({ userId }: { userId: string }) {
 
             <form onSubmit={handleSubmit} className="space-y-3">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-gray-400">
-                  Material title
-                </label>
+                <label className="text-[11px] font-medium text-gray-400">Material title</label>
                 <input
                   type="text"
                   value={form.title}
-                  onChange={(event) =>
-                    setForm((state) => ({ ...state, title: event.target.value }))
-                  }
+                  onChange={(event) => setForm((state) => ({ ...state, title: event.target.value }))}
                   placeholder="e.g. Lecture 3 notes"
                   className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
                   required
@@ -449,21 +475,14 @@ export function StudyHub({ userId }: { userId: string }) {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-[11px] font-medium text-gray-400">
-                  Course
-                </label>
+                <label className="text-[11px] font-medium text-gray-400">Course</label>
                 <select
                   value={form.course}
-                  onChange={(event) =>
-                    setForm((state) => ({ ...state, course: event.target.value }))
-                  }
+                  onChange={(event) => setForm((state) => ({ ...state, course: event.target.value }))}
                   className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
                 >
                   {FIRST_YEAR_SUBJECTS.map((subject) => (
-                    <option
-                      key={subject.code}
-                      value={`${subject.code} - ${subject.title}`}
-                    >
+                    <option key={subject.code} value={`${subject.code} - ${subject.title}`}>
                       {subject.code} - {subject.title}
                     </option>
                   ))}
@@ -472,17 +491,10 @@ export function StudyHub({ userId }: { userId: string }) {
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-medium text-gray-400">
-                    Category
-                  </label>
+                  <label className="text-[11px] font-medium text-gray-400">Category</label>
                   <select
                     value={form.category}
-                    onChange={(event) =>
-                      setForm((state) => ({
-                        ...state,
-                        category: event.target.value as Category,
-                      }))
-                    }
+                    onChange={(event) => setForm((state) => ({ ...state, category: event.target.value as Category }))}
                     className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
                   >
                     {CATEGORIES.map((category) => (
@@ -493,17 +505,10 @@ export function StudyHub({ userId }: { userId: string }) {
                   </select>
                 </div>
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-medium text-gray-400">
-                    Privacy
-                  </label>
+                  <label className="text-[11px] font-medium text-gray-400">Privacy</label>
                   <select
                     value={form.privacy}
-                    onChange={(event) =>
-                      setForm((state) => ({
-                        ...state,
-                        privacy: event.target.value as Privacy,
-                      }))
-                    }
+                    onChange={(event) => setForm((state) => ({ ...state, privacy: event.target.value as Privacy }))}
                     className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
                   >
                     <option value="private">Private (My Vault)</option>
@@ -515,9 +520,7 @@ export function StudyHub({ userId }: { userId: string }) {
               {/* Upload mode */}
               {mode === "upload" && (
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-medium text-gray-400">
-                    File (PDF or image, max 8 MB)
-                  </label>
+                  <label className="text-[11px] font-medium text-gray-400">File (PDF or image, max 8 MB)</label>
                   <input
                     type="file"
                     accept="application/pdf,image/*"
@@ -525,9 +528,7 @@ export function StudyHub({ userId }: { userId: string }) {
                     className="block w-full text-xs text-gray-400 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-200 hover:file:bg-zinc-700"
                   />
                   {fileData && (
-                    <p className="text-[10px] text-emerald-400">
-                      File ready ({fileType || "unknown"})
-                    </p>
+                    <p className="text-[10px] text-emerald-400">File ready ({fileType || "unknown"})</p>
                   )}
                 </div>
               )}
@@ -536,12 +537,7 @@ export function StudyHub({ userId }: { userId: string }) {
               {mode === "camera" && (
                 <div className="space-y-2">
                   <div className="relative overflow-hidden rounded-lg border border-zinc-700 bg-black">
-                    <video
-                      ref={videoRef}
-                      playsInline
-                      muted
-                      className="h-48 w-full object-cover"
-                    />
+                    <video ref={videoRef} playsInline muted className="h-48 w-full object-cover" />
                     {!cameraActive && (
                       <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-500">
                         {cameraError ?? "Starting camera…"}
@@ -559,9 +555,7 @@ export function StudyHub({ userId }: { userId: string }) {
                       Snap photo
                     </button>
                     {fileData && (
-                      <span className="self-center text-[10px] text-emerald-400">
-                        Photo captured
-                      </span>
+                      <span className="self-center text-[10px] text-emerald-400">Photo captured</span>
                     )}
                   </div>
                   <input
@@ -572,8 +566,7 @@ export function StudyHub({ userId }: { userId: string }) {
                     className="block w-full text-xs text-gray-400 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-800 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-200 hover:file:bg-zinc-700"
                   />
                   <p className="text-[10px] text-gray-500">
-                    Fallback: use the file picker above if the live camera is
-                    unavailable.
+                    Fallback: use the file picker above if the live camera is unavailable.
                   </p>
                 </div>
               )}
@@ -619,17 +612,9 @@ export function StudyHub({ userId }: { userId: string }) {
             <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
               {isImage(viewing.fileType) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={viewing.fileData}
-                  alt={viewing.title}
-                  className="max-h-[80vh] w-full object-contain"
-                />
+                <img src={viewing.fileData} alt={viewing.title} className="max-h-[80vh] w-full object-contain" />
               ) : (
-                <iframe
-                  src={viewing.fileData}
-                  title={viewing.title}
-                  className="h-[80vh] w-full"
-                />
+                <iframe src={viewing.fileData} title={viewing.title} className="h-[80vh] w-full" />
               )}
             </div>
             <p className="mt-2 text-xs text-gray-400">{viewing.title}</p>
@@ -639,5 +624,3 @@ export function StudyHub({ userId }: { userId: string }) {
     </div>
   );
 }
-
-export default StudyHub;

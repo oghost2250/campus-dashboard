@@ -67,6 +67,7 @@ model User {
   moodleUrl      String?
   auditEntries   AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
+  studyMaterials StudyMaterial[]
 
   // Admin directory is ordered by status then recency; this keeps that scan cheap.
   @@index([status, createdAt])
@@ -369,4 +370,25 @@ model Assignment {
   @@index([createdById])
   @@index([createdAt])
   @@map("assignments")
+}
+
+/// Shared study material (note, exam, summary, assignment). Private materials
+/// are visible only to their owner; public ones appear in the community feed.
+model StudyMaterial {
+  id        String   @id @default(cuid())
+  title     String
+  course    String
+  category  String
+  privacy   String   @default("private")
+  fileData  String
+  fileType  String
+  ownerName String
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([privacy, createdAt])
+  @@index([userId])
+  @@map("study_materials")
 }

@@ -129,6 +129,18 @@ export type AdminUserDTO = {
   createdAt: string;
 };
 
+export type StudyMaterialDTO = {
+  id: string;
+  title: string;
+  course: string;
+  category: string;
+  privacy: "private" | "public";
+  fileData: string;
+  fileType: string;
+  owner: string;
+  createdAt: string;
+  isOwner: boolean;
+};
 export type AdminAuditDTO = {
   id: string;
   action: string;
