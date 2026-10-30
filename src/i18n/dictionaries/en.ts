@@ -44,6 +44,7 @@ export const en = {
   nav: {
     dashboard: "Dashboard",
     tasks: "Assignments",
+    assignments: "Course assignments",
     gpa: "GPA calculator",
     snippets: "Snippets",
     pomodoro: "Pomodoro",

@@ -41,6 +41,7 @@ export const ar: Dictionary = {
   nav: {
     dashboard: "لوحة التحكم",
     tasks: "الواجبات",
+    assignments: "واجبات المقررات",
     gpa: "حاسبة المعدل",
     snippets: "المقتطفات",
     pomodoro: "بومودورو",

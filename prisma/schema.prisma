@@ -58,6 +58,7 @@ model User {
   pomodoros      PomodoroSession[]
   syllabusTopics SyllabusTopic[]
   projects       Project[]
+  submissions    AssignmentSubmission[]
 
   @@map("users")
 }
@@ -295,4 +296,21 @@ model PomodoroSession {
 
   @@index([userId, startedAt])
   @@map("pomodoro_sessions")
+}
+
+/// A scanned/submitted assignment record (Moodle submission log).
+model AssignmentSubmission {
+  id                 String   @id @default(cuid())
+  title              String
+  course             String
+  moodleAssignmentId String?
+  submittedAt        DateTime @default(now())
+  status             String   @default("submitted")
+  createdAt          DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, submittedAt])
+  @@map("assignment_submissions")
 }
