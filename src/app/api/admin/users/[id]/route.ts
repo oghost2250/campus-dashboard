@@ -107,9 +107,6 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     if (!hasRole(admin.role, "SUPER_ADMIN")) {
       return forbidden("SUPER_ADMIN_ONLY");
     }
-    if (nextRole === "SUPER_ADMIN" && !target.emailVerified) {
-      return forbidden("EMAIL_UNVERIFIED");
-    }
   }
 
   const losesAdmin =

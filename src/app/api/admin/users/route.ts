@@ -122,7 +122,7 @@ export async function POST(request: Request) {
         role,
         status,
         approvedAt: status === "ACTIVE" ? new Date() : null,
-        emailVerified: status === "ACTIVE" ? new Date() : null,
+        emailVerified: new Date(),
       },
       select: adminUserSelect,
     });

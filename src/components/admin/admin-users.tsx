@@ -504,7 +504,6 @@ export function AdminUsers({
                   canManage &&
                   user.status === "ACTIVE" &&
                   user.role === "ADMIN" &&
-                  Boolean(user.emailVerified) &&
                   hasRole(actorRole, "SUPER_ADMIN");
 
                 return (
@@ -580,11 +579,6 @@ export function AdminUsers({
                               year: "numeric",
                             })}
                           </span>
-                          {!user.emailVerified ? (
-                            <span className="text-warning">
-                              {t.admin.emailUnverified}
-                            </span>
-                          ) : null}
                         </div>
                       </div>
                     </div>
