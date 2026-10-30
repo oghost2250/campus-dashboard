@@ -59,6 +59,7 @@ model User {
   syllabusTopics SyllabusTopic[]
   projects       Project[]
   submissions    AssignmentSubmission[]
+  assignments    Assignment[]
   moodleToken    String?
   moodleUrl      String?
 
@@ -315,4 +316,23 @@ model AssignmentSubmission {
 
   @@index([userId, submittedAt])
   @@map("assignment_submissions")
+}
+
+/// Batch assignment created for the First Year CS cohort. Every student in
+/// "Subjects First Year" sees the same card on their dashboard.
+model Assignment {
+  id          String   @id @default(cuid())
+  title       String
+  course      String
+  dueDate     DateTime
+  moodleUrl   String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([course])
+  @@index([createdAt])
+  @@map("assignments")
 }
