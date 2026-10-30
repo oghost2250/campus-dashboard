@@ -5,22 +5,34 @@ import {
   invalid,
   parseDate,
   readJson,
+  readPagination,
   requireUserId,
   unauthorized,
 } from "@/lib/api";
 import { projectInputSchema } from "@/lib/validations/project";
 import { projectDTO } from "@/lib/serialize";
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await requireUserId();
   if (!userId) return unauthorized();
 
-  const projects = await prisma.project.findMany({
-    where: { userId },
-    orderBy: [{ status: "asc" }, { completedAt: "desc" }, { updatedAt: "desc" }],
-  });
+  const { limit, offset } = readPagination(request);
 
-  return NextResponse.json({ projects: projects.map(projectDTO) });
+  const [projects, total] = await Promise.all([
+    prisma.project.findMany({
+      where: { userId },
+      orderBy: [{ status: "asc" }, { completedAt: "desc" }, { updatedAt: "desc" }],
+      take: limit,
+      skip: offset,
+    }),
+    prisma.project.count({ where: { userId } }),
+  ]);
+
+  return NextResponse.json({
+    projects: projects.map(projectDTO),
+    total,
+    hasMore: offset + projects.length < total,
+  });
 }
 
 export async function POST(request: Request) {

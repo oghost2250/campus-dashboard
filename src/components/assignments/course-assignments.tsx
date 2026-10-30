@@ -6,6 +6,13 @@ import { jsPDF } from "jspdf";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
+import {
+  downscaleImage,
+  loadPersisted,
+  savePersisted,
+} from "@/lib/browser-store";
+
+const MAX_PAGES = 25;
 
 type Assignment = {
   id: string;
@@ -45,6 +52,9 @@ export function CourseAssignments() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loadingAssignments, setLoadingAssignments] = useState(true);
   const [feedError, setFeedError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -83,14 +93,19 @@ export function CourseAssignments() {
     let cancelled = false;
     async function load() {
       try {
-        const response = await fetch("/api/assignments");
+        const response = await fetch("/api/assignments?page=1&pageSize=100");
         if (!response.ok) {
           const data = (await response.json()) as { error?: string };
           throw new Error(data.error ?? "Could not load assignments.");
         }
-        const data = (await response.json()) as { assignments?: Assignment[] };
+        const data = (await response.json()) as {
+          assignments?: Assignment[];
+          hasMore?: boolean;
+        };
         if (!cancelled && data.assignments) {
           setAssignments(data.assignments);
+          setHasMore(Boolean(data.hasMore));
+          setPage(1);
         }
       } catch (err) {
         if (!cancelled) {
@@ -143,7 +158,11 @@ export function CourseAssignments() {
     setCameraActive(false);
   }
 
-  function snapPhoto() {
+  async function snapPhoto() {
+    if (pages.length >= MAX_PAGES) {
+      setError(`You can attach up to ${MAX_PAGES} pages per submission.`);
+      return;
+    }
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
@@ -152,8 +171,11 @@ export function CourseAssignments() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const data = canvas.toDataURL("image/jpeg", 0.9);
-    setPages((current) => [...current, data]);
+    const data = await downscaleImage(canvas.toDataURL("image/jpeg", 0.9));
+    setPages((current) =>
+      current.length >= MAX_PAGES ? current : [...current, data],
+    );
+    setPreviewPdf(null);
   }
 
   async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -166,18 +188,31 @@ export function CourseAssignments() {
           (file) =>
             new Promise<string>((resolve, reject) => {
               const reader = new FileReader();
-              reader.onload = () =>
-                typeof reader.result === "string"
-                  ? resolve(reader.result)
-                  : reject(new Error(`Could not read ${file.name}.`));
+              reader.onload = async () => {
+                if (typeof reader.result !== "string") {
+                  reject(new Error(`Could not read ${file.name}.`));
+                  return;
+                }
+                resolve(
+                  file.type.startsWith("image/")
+                    ? await downscaleImage(reader.result)
+                    : reader.result,
+                );
+              };
               reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
               reader.readAsDataURL(file);
             }),
         ),
       );
-      setPages((current) => [...current, ...images]);
+      setPages((current) => {
+        const merged = [...current, ...images];
+        if (merged.length > MAX_PAGES) {
+          setError(`Only the first ${MAX_PAGES} pages are kept.`);
+        }
+        return merged.slice(0, MAX_PAGES);
+      });
       setPreviewPdf(null);
-      setError(null);
+      if (images.length + pages.length <= MAX_PAGES) setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not read selected pages.");
     }
@@ -204,13 +239,34 @@ export function CourseAssignments() {
       return;
     }
     try {
-      const pdf = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "mm",
+        format: "a4",
+        compress: true,
+      });
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const maxWidth = pageWidth - margin * 2;
+      const maxHeight = pageHeight - margin * 2;
+
       pages.forEach((page, index) => {
         if (index > 0) pdf.addPage();
-        const imgWidth = 190;
-        const imgHeight = 270;
-        const format = page.startsWith("data:image/png") ? "PNG" : "JPEG";
-        pdf.addImage(page, format, 10, 10, imgWidth, imgHeight);
+        const props = pdf.getImageProperties(page);
+        const ratio = Math.min(maxWidth / props.width, maxHeight / props.height);
+        const width = props.width * ratio;
+        const height = props.height * ratio;
+        pdf.addImage(
+          page,
+          "JPEG",
+          (pageWidth - width) / 2,
+          margin,
+          width,
+          height,
+          undefined,
+          "FAST",
+        );
       });
       const url = pdf.output("datauristring");
       setPreviewPdf(url);
@@ -237,14 +293,19 @@ export function CourseAssignments() {
           fileType: "application/pdf",
         }),
       });
-      if (!response.ok) throw new Error("Submission failed");
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(payload?.error ?? "Submission failed");
+      }
 
       await response.json();
 
-      // Backup to Study Hub vault (localStorage)
+      // Backup to the Study Hub vault (IndexedDB; PDFs exceed localStorage).
       try {
-        const raw = window.localStorage.getItem("campus-study-hub");
-        const existing = raw ? (JSON.parse(raw) as unknown[]) : [];
+        const existing =
+          (await loadPersisted<unknown[]>("campus-study-hub")) ?? [];
         const backup = {
           id: `backup-${Date.now()}`,
           title: `${activeAssignment.title} (Submitted)`,
@@ -256,10 +317,7 @@ export function CourseAssignments() {
           owner: "You",
           createdAt: Date.now(),
         };
-        window.localStorage.setItem(
-          "campus-study-hub",
-          JSON.stringify([backup, ...existing]),
-        );
+        await savePersisted("campus-study-hub", [backup, ...existing]);
       } catch {
         // ignore storage errors
       }
@@ -275,6 +333,48 @@ export function CourseAssignments() {
   function openScanner(assignment: Assignment) {
     setActiveId(assignment.id);
     setModalOpen(true);
+  }
+
+  async function loadMoreAssignments() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    try {
+      const response = await fetch(
+        `/api/assignments?page=${nextPage}&pageSize=100`,
+      );
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as
+          | { error?: string }
+          | null;
+        throw new Error(payload?.error ?? "Could not load more assignments.");
+      }
+
+      const data = (await response.json()) as {
+        assignments?: Assignment[];
+        hasMore?: boolean;
+      };
+
+      setAssignments((current) => {
+        const seen = new Set(current.map((item) => item.id));
+        return [
+          ...current,
+          ...(data.assignments ?? []).filter((item) => !seen.has(item.id)),
+        ].sort(
+          (left, right) =>
+            new Date(left.dueDate).getTime() - new Date(right.dueDate).getTime(),
+        );
+      });
+      setPage(nextPage);
+      setHasMore(Boolean(data.hasMore));
+      setFeedError(null);
+    } catch (err) {
+      setFeedError(
+        err instanceof Error ? err.message : "Could not load more assignments.",
+      );
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   async function handleAddSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -399,7 +499,7 @@ export function CourseAssignments() {
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {assignments.map((assignment) => {
             const isOverdue = new Date(assignment.dueDate).getTime() <= now;
-            const courseCode = assignment.course.split(" - ")[0];
+            const courseCode = (assignment.course ?? "").split(" - ")[0] || "CS";
             return (
               <div
                 key={assignment.id}
@@ -480,6 +580,19 @@ export function CourseAssignments() {
           })}
         </div>
       )}
+
+      {!loadingAssignments && assignments.length > 0 && hasMore ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={loadMoreAssignments}
+            disabled={loadingMore}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-xs font-medium text-gray-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {loadingMore ? "Loading…" : "Load more assignments"}
+          </button>
+        </div>
+      ) : null}
 
       {/* Add Assignment modal */}
       {addModalOpen && (

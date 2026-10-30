@@ -1,34 +1,76 @@
 import "server-only";
 import { NextResponse } from "next/server";
 import type { ZodError } from "zod";
-import type { UserRole } from "@prisma/client";
+import type { UserRole, UserStatus } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 
 /**
- * Returns the authenticated, active user id, or null. Never trust a
- * body-supplied id.
+ * Short-lived per-instance cache for the "is this account active?" read.
  *
- * The status check is deliberately a database read: a suspended account still
- * holds a valid JWT, so the token alone is not enough to authorise writes.
+ * Every API request used to issue a second query to fetch the user's status.
+ * With a few thousand students that doubles the database read volume for no
+ * benefit. A 15 second window keeps suspensions responsive while cutting the
+ * majority of the duplicate reads. Admin checks deliberately bypass this cache
+ * and always read the database.
  */
-export async function requireUserId(): Promise<string | null> {
-  const session = await auth();
-  const id = session?.user?.id;
-  if (!id) return null;
+const STATUS_TTL_MS = 15_000;
+const STATUS_CACHE_MAX = 10_000;
+
+type StatusEntry = { status: UserStatus; expiresAt: number };
+const statusCache = new Map<string, StatusEntry>();
+
+async function lookupStatus(id: string): Promise<UserStatus | null> {
+  const now = Date.now();
+  const cached = statusCache.get(id);
+  if (cached && cached.expiresAt > now) return cached.status;
+
+  if (statusCache.size > STATUS_CACHE_MAX) {
+    for (const [key, entry] of statusCache) {
+      if (entry.expiresAt <= now) statusCache.delete(key);
+    }
+  }
 
   const user = await prisma.user.findUnique({
     where: { id },
     select: { status: true },
   });
 
-  return user?.status === "ACTIVE" ? id : null;
+  if (!user) {
+    statusCache.delete(id);
+    return null;
+  }
+
+  statusCache.set(id, { status: user.status, expiresAt: now + STATUS_TTL_MS });
+  return user.status;
+}
+
+/** Call after an admin changes a user's status so the change applies instantly. */
+export function invalidateUserStatus(id: string) {
+  statusCache.delete(id);
+}
+
+/**
+ * Returns the authenticated, active user id, or null. Never trust a
+ * body-supplied id.
+ *
+ * The status check is deliberately a database read (cached briefly): a
+ * suspended account still holds a valid JWT, so the token alone is not enough
+ * to authorise writes.
+ */
+export async function requireUserId(): Promise<string | null> {
+  const session = await auth();
+  const id = session?.user?.id;
+  if (!id) return null;
+
+  const status = await lookupStatus(id);
+  return status === "ACTIVE" ? id : null;
 }
 
 export type ApiAdmin = { id: string; role: UserRole };
 
-/** Returns the signed-in admin, or null for everyone else. */
+/** Returns the signed-in admin, or null for everyone else. Always fresh. */
 export async function requireAdminUserId(): Promise<ApiAdmin | null> {
   const session = await auth();
   const id = session?.user?.id;
@@ -42,6 +84,15 @@ export async function requireAdminUserId(): Promise<ApiAdmin | null> {
   if (!user || user.status !== "ACTIVE" || user.role !== "ADMIN") return null;
 
   return { id: user.id, role: user.role };
+}
+
+/** True when the user is an active admin. Used for moderation (delete) paths. */
+export async function isAdminUser(id: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: { role: true, status: true },
+  });
+  return Boolean(user && user.status === "ACTIVE" && user.role === "ADMIN");
 }
 
 export function unauthorized() {
@@ -91,4 +142,27 @@ export async function readJson(request: Request): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Offset pagination for list endpoints. Caps the page size so a single client
+ * cannot ask the database for an unbounded result set.
+ */
+export function readPagination(
+  request: Request,
+  defaultLimit = 200,
+  maxLimit = 500,
+): { limit: number; offset: number } {
+  const params = new URL(request.url).searchParams;
+
+  const rawLimit = Number(params.get("limit"));
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(Math.trunc(rawLimit), 1), maxLimit)
+    : defaultLimit;
+
+  const rawOffset = Number(params.get("offset"));
+  const offset =
+    Number.isFinite(rawOffset) && rawOffset > 0 ? Math.trunc(rawOffset) : 0;
+
+  return { limit, offset };
 }

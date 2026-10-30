@@ -4,22 +4,34 @@ import { prisma } from "@/lib/prisma";
 import {
   invalid,
   readJson,
+  readPagination,
   requireUserId,
   unauthorized,
 } from "@/lib/api";
 import { syllabusTopicInputSchema } from "@/lib/validations/syllabus";
 import { syllabusTopicDTO } from "@/lib/serialize";
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await requireUserId();
   if (!userId) return unauthorized();
 
-  const topics = await prisma.syllabusTopic.findMany({
-    where: { userId },
-    orderBy: [{ course: "asc" }, { createdAt: "asc" }],
-  });
+  const { limit, offset } = readPagination(request);
 
-  return NextResponse.json({ topics: topics.map(syllabusTopicDTO) });
+  const [topics, total] = await Promise.all([
+    prisma.syllabusTopic.findMany({
+      where: { userId },
+      orderBy: [{ course: "asc" }, { createdAt: "asc" }],
+      take: limit,
+      skip: offset,
+    }),
+    prisma.syllabusTopic.count({ where: { userId } }),
+  ]);
+
+  return NextResponse.json({
+    topics: topics.map(syllabusTopicDTO),
+    total,
+    hasMore: offset + topics.length < total,
+  });
 }
 
 export async function POST(request: Request) {

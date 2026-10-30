@@ -9,10 +9,12 @@ import {
   readJson,
   requireAdminUserId,
 } from "@/lib/api";
-import { computeAdminStats } from "@/lib/admin";
 import { adminUserDTO } from "@/lib/serialize";
 import { adminCreateUserSchema } from "@/lib/validations/admin";
 import type { AdminUsersResponse } from "@/lib/types";
+
+const DEFAULT_PAGE_SIZE = 100;
+const MAX_PAGE_SIZE = 200;
 
 const userInclude = {
   _count: {
@@ -27,7 +29,12 @@ function parseEnum<T extends string>(
   return value && values.includes(value as T) ? (value as T) : undefined;
 }
 
-/** List accounts, newest / most urgent first. Admin only. */
+/**
+ * List accounts, newest / most urgent first. Admin only.
+ *
+ * Paginated because the section can hold thousands of students; the admin UI
+ * loads further pages on demand instead of transferring the whole directory.
+ */
 export async function GET(request: Request) {
   const admin = await requireAdminUserId();
   if (!admin) return forbidden("ADMIN_ONLY");
@@ -36,6 +43,14 @@ export async function GET(request: Request) {
   const q = url.searchParams.get("q")?.trim() ?? "";
   const status = parseEnum(Object.values(UserStatus), url.searchParams.get("status"));
   const role = parseEnum(Object.values(UserRole), url.searchParams.get("role"));
+
+  const rawPage = Number(url.searchParams.get("page"));
+  const rawPageSize = Number(url.searchParams.get("pageSize"));
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.trunc(rawPage) : 1;
+  const pageSize =
+    Number.isFinite(rawPageSize) && rawPageSize > 0
+      ? Math.min(Math.trunc(rawPageSize), MAX_PAGE_SIZE)
+      : DEFAULT_PAGE_SIZE;
 
   const where: Prisma.UserWhereInput = {
     ...(q
@@ -50,26 +65,35 @@ export async function GET(request: Request) {
     ...(role ? { role } : {}),
   };
 
-  const [users, total, pending, active, suspended, admins] = await Promise.all([
-    prisma.user.findMany({
-      where,
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
-      take: 500,
-      include: userInclude,
-    }),
-    prisma.user.count(),
-    prisma.user.count({ where: { status: "PENDING" } }),
-    prisma.user.count({ where: { status: "ACTIVE" } }),
-    prisma.user.count({ where: { status: "SUSPENDED" } }),
-    prisma.user.count({ where: { role: "ADMIN" } }),
-  ]);
+  const [users, total, matching, pending, active, suspended, admins] =
+    await Promise.all([
+      prisma.user.findMany({
+        where,
+        orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        include: userInclude,
+      }),
+      prisma.user.count(),
+      prisma.user.count({ where }),
+      prisma.user.count({ where: { status: "PENDING" } }),
+      prisma.user.count({ where: { status: "ACTIVE" } }),
+      prisma.user.count({ where: { status: "SUSPENDED" } }),
+      prisma.user.count({ where: { role: "ADMIN" } }),
+    ]);
 
   const payload: AdminUsersResponse = {
     users: users.map(adminUserDTO),
     stats: { total, pending, active, suspended, admins },
+    page,
+    pageSize,
+    total: matching,
+    hasMore: page * pageSize < matching,
   };
 
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, {
+    headers: { "Cache-Control": "private, no-store" },
+  });
 }
 
 /** Create an account on someone's behalf, already approved if requested. */
@@ -98,16 +122,7 @@ export async function POST(request: Request) {
       include: userInclude,
     });
 
-    const users = await prisma.user.findMany({
-      orderBy: [{ status: "asc" }, { createdAt: "desc" }],
-      take: 500,
-      include: userInclude,
-    });
-
-    return NextResponse.json(
-      { user: adminUserDTO(user), stats: computeAdminStats(users.map(adminUserDTO)) },
-      { status: 201 },
-    );
+    return NextResponse.json({ user: adminUserDTO(user) }, { status: 201 });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

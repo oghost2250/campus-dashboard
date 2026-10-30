@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import {
   forbidden,
   invalid,
+  invalidateUserStatus,
   notFound,
   readJson,
   requireAdminUserId,
@@ -86,6 +87,8 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       include: userInclude,
     });
 
+    invalidateUserStatus(id);
+
     return NextResponse.json({ user: adminUserDTO(user) });
   } catch (error) {
     if (
@@ -125,6 +128,7 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 
   try {
     await prisma.user.delete({ where: { id } });
+    invalidateUserStatus(id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     if (

@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, FileText, Image as ImageIcon, Plus, X } from "lucide-react";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
+import {
+  downscaleImage,
+  loadPersisted,
+  savePersisted,
+} from "@/lib/browser-store";
 
 type Privacy = "private" | "public";
 type Category = "Lecture Notes" | "Past Exam" | "Summary" | "Assignment";
@@ -85,29 +90,36 @@ export function StudyHub() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Load from localStorage
+  // Load persisted uploads from IndexedDB (migrates legacy localStorage).
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Material[];
+    let cancelled = false;
+    (async () => {
+      const parsed = await loadPersisted<Material[]>(STORAGE_KEY);
+      if (!cancelled && Array.isArray(parsed)) {
         setMaterials([...SEED_MATERIALS, ...parsed]);
       }
-    } catch {
-      // ignore
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  // Persist user uploads
+  // Persist user uploads (debounced so scans do not rewrite on every render).
   useEffect(() => {
     const userUploads = materials.filter(
       (material) => !SEED_MATERIALS.some((seed) => seed.id === material.id),
     );
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(userUploads));
-    } catch {
-      // ignore
-    }
+
+    const timer = window.setTimeout(async () => {
+      const saved = await savePersisted(STORAGE_KEY, userUploads);
+      if (!saved) {
+        setError(
+          "Local storage is full. Remove a few saved materials to free space.",
+        );
+      }
+    }, 400);
+
+    return () => window.clearTimeout(timer);
   }, [materials]);
 
   // Camera lifecycle
@@ -148,7 +160,7 @@ export function StudyHub() {
     setCameraActive(false);
   }
 
-  function snapPhoto() {
+  async function snapPhoto() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
@@ -157,7 +169,7 @@ export function StudyHub() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const data = canvas.toDataURL("image/jpeg", 0.9);
+    const data = await downscaleImage(canvas.toDataURL("image/jpeg", 0.9));
     setFileData(data);
     setFileType("image/jpeg");
     stopCamera();
@@ -171,8 +183,12 @@ export function StudyHub() {
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => {
-      setFileData(reader.result as string);
+    reader.onload = async () => {
+      const raw = reader.result as string;
+      const data = file.type.startsWith("image/")
+        ? await downscaleImage(raw)
+        : raw;
+      setFileData(data);
       setFileType(file.type || "application/octet-stream");
       setError(null);
     };

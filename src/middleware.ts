@@ -9,6 +9,6 @@ export const config = {
      * Run on everything except static assets and the auth API itself.
      * Public pages are allowed through by the `authorized` callback.
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!api/auth|api/health|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

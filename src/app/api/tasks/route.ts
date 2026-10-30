@@ -5,21 +5,33 @@ import {
   invalid,
   parseDate,
   readJson,
+  readPagination,
   requireUserId,
   unauthorized,
 } from "@/lib/api";
 import { taskInputSchema } from "@/lib/validations/task";
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await requireUserId();
   if (!userId) return unauthorized();
 
-  const tasks = await prisma.task.findMany({
-    where: { userId },
-    orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
-  });
+  const { limit, offset } = readPagination(request);
 
-  return NextResponse.json({ tasks });
+  const [tasks, total] = await Promise.all([
+    prisma.task.findMany({
+      where: { userId },
+      orderBy: [{ status: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+      take: limit,
+      skip: offset,
+    }),
+    prisma.task.count({ where: { userId } }),
+  ]);
+
+  return NextResponse.json({
+    tasks,
+    total,
+    hasMore: offset + tasks.length < total,
+  });
 }
 
 export async function POST(request: Request) {

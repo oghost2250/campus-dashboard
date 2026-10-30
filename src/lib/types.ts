@@ -145,4 +145,8 @@ export type AdminStatsDTO = {
 export type AdminUsersResponse = {
   users: AdminUserDTO[];
   stats: AdminStatsDTO;
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  hasMore?: boolean;
 };

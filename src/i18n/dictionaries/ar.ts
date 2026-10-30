@@ -468,6 +468,7 @@ export const ar: Dictionary = {
     errorValidation: "راجع الاسم والبريد وكلمة المرور.",
     cannotEditSelf: "هذا حسابك",
     pendingHint: "تظهر التسجيلات الجديدة هنا للاعتماد.",
+    loadMore: "تحميل المزيد من الحسابات",
   },
   pending: {
     title: "مراجعة الحساب",

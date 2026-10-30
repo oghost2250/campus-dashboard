@@ -57,8 +57,11 @@ import {
 import { useI18n } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
-import { computeAdminStats } from "@/lib/admin";
-import type { AdminUserDTO } from "@/lib/types";
+import type {
+  AdminStatsDTO,
+  AdminUserDTO,
+  AdminUsersResponse,
+} from "@/lib/types";
 import type { UserRole, UserStatus } from "@prisma/client";
 
 type StatusFilter = "ALL" | UserStatus;
@@ -94,14 +97,24 @@ function sortUsers(users: AdminUserDTO[]) {
 
 export function AdminUsers({
   initialUsers,
+  initialStats,
+  initialHasMore = false,
+  pageSize = 100,
   currentUserId,
 }: {
   initialUsers: AdminUserDTO[];
+  initialStats: AdminStatsDTO;
+  initialHasMore?: boolean;
+  pageSize?: number;
   currentUserId: string;
 }) {
   const { t, locale } = useI18n();
 
   const [users, setUsers] = useState(initialUsers);
+  const [stats, setStats] = useState<AdminStatsDTO>(initialStats);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [roleFilter, setRoleFilter] = useState<RoleFilter>("ALL");
@@ -114,7 +127,49 @@ export function AdminUsers({
 
   useEffect(() => setUsers(initialUsers), [initialUsers]);
 
-  const stats = useMemo(() => computeAdminStats(users), [users]);
+  async function refreshStats() {
+    try {
+      const response = await fetch("/api/admin/users?page=1&pageSize=1", {
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { stats?: AdminStatsDTO };
+      if (payload.stats) setStats(payload.stats);
+    } catch {
+      // Stats are cosmetic; a failed refresh should not surface an error.
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    try {
+      const response = await fetch(
+        `/api/admin/users?page=${nextPage}&pageSize=${pageSize}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) throw new Error("FAILED");
+
+      const payload = (await response.json()) as AdminUsersResponse;
+      const incoming = payload.users ?? [];
+
+      setUsers((current) => {
+        const seen = new Set(current.map((item) => item.id));
+        return sortUsers([
+          ...current,
+          ...incoming.filter((item) => !seen.has(item.id)),
+        ]);
+      });
+      setPage(nextPage);
+      setHasMore(Boolean(payload.hasMore));
+      if (payload.stats) setStats(payload.stats);
+    } catch {
+      toast.error(t.common.error);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -190,6 +245,7 @@ export function AdminUsers({
         sortUsers(current.map((item) => (item.id === updated.id ? updated : item))),
       );
       toast.success(toastForPatch(user, patch));
+      void refreshStats();
     } catch (error) {
       toast.error(errorMessage(error instanceof Error ? error.message : undefined));
     } finally {
@@ -221,6 +277,7 @@ export function AdminUsers({
       toast.success(t.admin.createdToast);
       setCreateOpen(false);
       setForm(emptyForm);
+      void refreshStats();
     } catch {
       setFormError(t.common.error);
     } finally {
@@ -246,6 +303,7 @@ export function AdminUsers({
 
       setUsers((current) => current.filter((item) => item.id !== target.id));
       toast.success(t.admin.deletedToast);
+      void refreshStats();
     } catch (error) {
       toast.error(errorMessage(error instanceof Error ? error.message : undefined));
     } finally {
@@ -594,6 +652,24 @@ export function AdminUsers({
             </AnimatePresence>
           </ul>
         )}
+        {hasMore ? (
+          <div className="flex justify-center border-t border-border/60 p-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="rounded-xl"
+            >
+              {loadingMore ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Users className="size-4" />
+              )}
+              {loadingMore ? t.common.loading : t.admin.loadMore}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

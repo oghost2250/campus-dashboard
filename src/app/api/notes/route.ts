@@ -4,21 +4,33 @@ import { prisma } from "@/lib/prisma";
 import {
   invalid,
   readJson,
+  readPagination,
   requireUserId,
   unauthorized,
 } from "@/lib/api";
 import { noteCreateSchema } from "@/lib/validations/note";
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await requireUserId();
   if (!userId) return unauthorized();
 
-  const notes = await prisma.note.findMany({
-    where: { userId },
-    orderBy: [{ isPinned: "desc" }, { updatedAt: "desc" }],
-  });
+  const { limit, offset } = readPagination(request);
 
-  return NextResponse.json({ notes });
+  const [notes, total] = await Promise.all([
+    prisma.note.findMany({
+      where: { userId },
+      orderBy: [{ isPinned: "desc" }, { updatedAt: "desc" }],
+      take: limit,
+      skip: offset,
+    }),
+    prisma.note.count({ where: { userId } }),
+  ]);
+
+  return NextResponse.json({
+    notes,
+    total,
+    hasMore: offset + notes.length < total,
+  });
 }
 
 export async function POST(request: Request) {

@@ -4,22 +4,34 @@ import { prisma } from "@/lib/prisma";
 import {
   invalid,
   readJson,
+  readPagination,
   requireUserId,
   unauthorized,
 } from "@/lib/api";
 import { snippetInputSchema } from "@/lib/validations/snippet";
 import { snippetDTO } from "@/lib/serialize";
 
-export async function GET() {
+export async function GET(request: Request) {
   const userId = await requireUserId();
   if (!userId) return unauthorized();
 
-  const snippets = await prisma.snippet.findMany({
-    where: { userId },
-    orderBy: { updatedAt: "desc" },
-  });
+  const { limit, offset } = readPagination(request);
 
-  return NextResponse.json({ snippets: snippets.map(snippetDTO) });
+  const [snippets, total] = await Promise.all([
+    prisma.snippet.findMany({
+      where: { userId },
+      orderBy: { updatedAt: "desc" },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.snippet.count({ where: { userId } }),
+  ]);
+
+  return NextResponse.json({
+    snippets: snippets.map(snippetDTO),
+    total,
+    hasMore: offset + snippets.length < total,
+  });
 }
 
 export async function POST(request: Request) {

@@ -472,6 +472,7 @@ export const en = {
     errorValidation: "Check the name, email, and password.",
     cannotEditSelf: "This is your account",
     pendingHint: "New sign-ups appear here for approval.",
+    loadMore: "Load more accounts",
   },
   pending: {
     title: "Account review",

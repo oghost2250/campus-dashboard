@@ -63,6 +63,8 @@ model User {
   moodleToken    String?
   moodleUrl      String?
 
+  // Admin directory is ordered by status then recency; this keeps that scan cheap.
+  @@index([status, createdAt])
   @@map("users")
 }
 
@@ -314,6 +316,9 @@ model AssignmentSubmission {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  // One submission log per (student, assignment) so retries update instead of
+  // duplicating rows. NULL assignment ids are still allowed to repeat.
+  @@unique([userId, moodleAssignmentId])
   @@index([userId, submittedAt])
   @@map("assignment_submissions")
 }
@@ -327,12 +332,18 @@ model Assignment {
   dueDate     DateTime
   moodleUrl   String?
   createdById String?
+  /// Cohort the card is shared with. "CS-1" = First Year CS section.
+  cohort      String   @default("CS-1")
+  /// Soft-delete flag so moderators can hide a card without losing history.
+  isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
-  @@index([course])
+  // Hot path: one cohort's active feed, soonest first.
+  @@index([cohort, isActive, dueDate])
+  @@index([createdById])
   @@index([createdAt])
   @@map("assignments")
 }
