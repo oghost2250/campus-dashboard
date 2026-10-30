@@ -328,6 +328,7 @@ export const ar: Dictionary = {
     inputBase: "نظام الإدخال",
     decimal: "عشري",
     hexadecimal: "ست عشري",
+    octal: "ثماني",
     binary: "ثنائي",
     invalidNumber: "أدخل رقمًا صالحًا لهذا النظام.",
     baseHint: "تُقبل البادئات مثل 0x و0b والشرطات السفلية.",

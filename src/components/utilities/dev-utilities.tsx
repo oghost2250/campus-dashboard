@@ -60,9 +60,10 @@ export function DevUtilities() {
         label: t.utilities.hexadecimal,
         value: parsed.toString(16).toUpperCase(),
       },
+      { id: "oct", label: t.utilities.octal, value: parsed.toString(8) },
       { id: "bin", label: t.utilities.binary, value: parsed.toString(2) },
     ];
-  }, [parsed, t.utilities.decimal, t.utilities.hexadecimal, t.utilities.binary]);
+  }, [parsed, t.utilities.decimal, t.utilities.hexadecimal, t.utilities.octal, t.utilities.binary]);
 
   async function copyText(text: string, key: string) {
     try {
@@ -114,6 +115,7 @@ export function DevUtilities() {
               <SelectContent>
                 <SelectItem value="10">{t.utilities.decimal} (10)</SelectItem>
                 <SelectItem value="16">{t.utilities.hexadecimal} (16)</SelectItem>
+                <SelectItem value="8">{t.utilities.octal} (8)</SelectItem>
                 <SelectItem value="2">{t.utilities.binary} (2)</SelectItem>
               </SelectContent>
             </Select>

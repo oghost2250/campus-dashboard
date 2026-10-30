@@ -332,6 +332,7 @@ export const en = {
     inputBase: "Input base",
     decimal: "Decimal",
     hexadecimal: "Hexadecimal",
+    octal: "Octal",
     binary: "Binary",
     invalidNumber: "Enter a valid number for this base.",
     baseHint: "Prefixes like 0x, 0b, and underscores are accepted.",
