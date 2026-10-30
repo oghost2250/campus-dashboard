@@ -50,6 +50,7 @@ export const en = {
     notes: "Scratchpad",
     syllabus: "Syllabus",
     schedule: "Schedule",
+    studyHub: "Study Hub",
     utilities: "Dev utilities",
     projects: "Projects",
     academic: "Academic",

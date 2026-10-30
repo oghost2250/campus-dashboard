@@ -25,7 +25,7 @@ const DAYS = [
 ] as const;
 
 const START_HOUR = 7;
-const END_HOUR = 19; // 7 PM
+const END_HOUR = 18; // 6 PM (12 hourly rows, 7 PM end)
 const HOURS = Array.from(
   { length: END_HOUR - START_HOUR + 1 },
   (_, index) => START_HOUR + index,

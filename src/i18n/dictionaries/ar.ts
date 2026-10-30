@@ -47,6 +47,7 @@ export const ar: Dictionary = {
     notes: "المسودة",
     syllabus: "الخطة الدراسية",
     schedule: "الجدول الأسبوعي",
+    studyHub: "مركز الدراسة",
     utilities: "أدوات المطوّر",
     projects: "المشاريع",
     academic: "أكاديمي",

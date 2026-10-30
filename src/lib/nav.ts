@@ -5,6 +5,7 @@ import {
   Code2,
   FolderGit2,
   LayoutDashboard,
+  Library,
   ListChecks,
   NotebookPen,
   ShieldCheck,
@@ -22,6 +23,7 @@ export type NavItem = {
     | "gpa"
     | "syllabus"
     | "schedule"
+    | "studyHub"
     | "snippets"
     | "utilities"
     | "projects"
@@ -56,6 +58,7 @@ export const navGroups: NavGroup[] = [
       { href: "/dashboard/gpa", id: "gpa", icon: Calculator },
       { href: "/dashboard/syllabus", id: "syllabus", icon: BookOpenCheck },
       { href: "/dashboard/schedule", id: "schedule", icon: CalendarDays },
+      { href: "/dashboard/study-hub", id: "studyHub", icon: Library },
     ],
   },
   {
