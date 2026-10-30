@@ -20,7 +20,7 @@ const SOUNDS: {
 ];
 
 function fillNoise(context: AudioContext, kind: Sound): AudioBuffer {
-  const length = context.sampleRate * 3;
+  const length = context.sampleRate * 8;
   const buffer = context.createBuffer(1, length, context.sampleRate);
   const data = buffer.getChannelData(0);
 
@@ -31,6 +31,26 @@ function fillNoise(context: AudioContext, kind: Sound): AudioBuffer {
       const white = Math.random() * 2 - 1;
       last = (last + 0.02 * white) / 1.02;
       data[index] = last * 3.5;
+    }
+  } else if (kind === "rain") {
+    // Pink-ish noise: less harsh than white, closer to distant rainfall.
+    let b0 = 0;
+    let b1 = 0;
+    let b2 = 0;
+    let b3 = 0;
+    let b4 = 0;
+    let b5 = 0;
+    let b6 = 0;
+    for (let index = 0; index < length; index += 1) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.98974 * b2 + white * 0.153852;
+      b3 = 0.969 * b3 + white * 0.5367677;
+      b4 = 0.94 * b4 + white * 0.5596878;
+      b5 = 0.9 * b5 + white * 0.5290486;
+      b6 = 0.84 * b6 + white * 0.5053703;
+      data[index] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
     }
   } else {
     for (let index = 0; index < length; index += 1) {
@@ -45,11 +65,13 @@ export function AmbientSounds() {
   const { t } = useI18n();
 
   const [active, setActive] = useState<Sound | null>(null);
-  const [volume, setVolume] = useState(0.5);
+  const [volume, setVolume] = useState(0.35);
 
   const contextRef = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
+  const extraRef = useRef<AudioBufferSourceNode | null>(null);
   const lfoRef = useRef<OscillatorNode | null>(null);
+  const crestRef = useRef<OscillatorNode | null>(null);
   const masterRef = useRef<GainNode | null>(null);
 
   function stop() {
@@ -58,11 +80,21 @@ export function AmbientSounds() {
     } catch {
       // Already stopped.
     }
+    try {
+      extraRef.current?.stop();
+    } catch {
+      // Already stopped.
+    }
     sourceRef.current?.disconnect();
+    extraRef.current?.disconnect();
     lfoRef.current?.stop();
     lfoRef.current?.disconnect();
+    crestRef.current?.stop();
+    crestRef.current?.disconnect();
     sourceRef.current = null;
+    extraRef.current = null;
     lfoRef.current = null;
+    crestRef.current = null;
     setActive(null);
   }
 
@@ -83,59 +115,125 @@ export function AmbientSounds() {
       source.buffer = fillNoise(context, kind);
       source.loop = true;
 
+      const master = context.createGain();
+      master.gain.value = 0;
+      master.connect(context.destination);
+      masterRef.current = master;
+
+      // Fade in to avoid a click on start.
+      master.gain.linearRampToValueAtTime(volume, context.currentTime + 0.5);
+
       let node: AudioNode = source;
 
       if (kind === "rain") {
-        const filter = context.createBiquadFilter();
-        filter.type = "highpass";
-        filter.frequency.value = 700;
-        node.connect(filter);
-        node = filter;
+        const band = context.createBiquadFilter();
+        band.type = "bandpass";
+        band.frequency.value = 2600;
+        band.Q.value = 0.6;
+        node.connect(band);
+        node = band;
+
+        // Distant rumble layer underneath the droplets.
+        const rumble = context.createBufferSource();
+        rumble.buffer = fillNoise(context, "brown");
+        rumble.loop = true;
+        const rumbleFilter = context.createBiquadFilter();
+        rumbleFilter.type = "lowpass";
+        rumbleFilter.frequency.value = 260;
+        const rumbleGain = context.createGain();
+        rumbleGain.gain.value = 0.12;
+        rumble.connect(rumbleFilter);
+        rumbleFilter.connect(rumbleGain);
+        rumbleGain.connect(master);
+        rumble.start();
+        extraRef.current = rumble;
+
+        // Slow gust modulation so the rain breathes instead of hissing.
+        const gust = context.createOscillator();
+        const gustGain = context.createGain();
+        gust.type = "sine";
+        gust.frequency.value = 0.18;
+        gustGain.gain.value = 0.12;
+        gust.connect(gustGain);
+
+        const texture = context.createGain();
+        texture.gain.value = 0.32;
+        gustGain.connect(texture.gain);
+        node.connect(texture);
+        texture.connect(master);
+        gust.start();
+        lfoRef.current = gust;
       } else if (kind === "ocean") {
         const filter = context.createBiquadFilter();
         filter.type = "lowpass";
-        filter.frequency.value = 520;
+        filter.frequency.value = 380;
+        filter.Q.value = 0.7;
         node.connect(filter);
         node = filter;
+
+        const texture = context.createGain();
+        texture.gain.value = 0.45;
+        node.connect(texture);
+
+        // Slow swell in and out, like waves reaching the shore.
+        const swell = context.createOscillator();
+        const swellGain = context.createGain();
+        swell.type = "sine";
+        swell.frequency.value = 0.06;
+        swellGain.gain.value = 0.32;
+        swell.connect(swellGain);
+        swellGain.connect(texture.gain);
+
+        // Faster texture for the breaking-crest hiss.
+        const crest = context.createOscillator();
+        const crestGain = context.createGain();
+        crest.type = "sine";
+        crest.frequency.value = 0.22;
+        crestGain.gain.value = 0.06;
+        crest.connect(crestGain);
+        crestGain.connect(texture.gain);
+
+        texture.connect(master);
+        swell.start();
+        crest.start();
+        crestRef.current = crest;
+        lfoRef.current = swell;
       } else if (kind === "brown") {
         const filter = context.createBiquadFilter();
         filter.type = "lowpass";
-        filter.frequency.value = 1200;
+        filter.frequency.value = 620;
+        filter.Q.value = 0.7;
         node.connect(filter);
         node = filter;
+
+        const texture = context.createGain();
+        texture.gain.value = 0.45;
+        node.connect(texture);
+        texture.connect(master);
+      } else {
+        const filter = context.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.value = 3600;
+        filter.Q.value = 0.5;
+        node.connect(filter);
+        node = filter;
+
+        const texture = context.createGain();
+        texture.gain.value = 0.18;
+        node.connect(texture);
+        texture.connect(master);
       }
-
-      const texture = context.createGain();
-      texture.gain.value = kind === "ocean" ? 0.6 : 0.45;
-      node.connect(texture);
-
-      if (kind === "ocean") {
-        // Slow swell in and out, like waves reaching the shore.
-        const lfo = context.createOscillator();
-        const lfoGain = context.createGain();
-        lfo.type = "sine";
-        lfo.frequency.value = 0.08;
-        lfoGain.gain.value = 0.3;
-        lfo.connect(lfoGain);
-        lfoGain.connect(texture.gain);
-        lfo.start();
-        lfoRef.current = lfo;
-      }
-
-      const master = context.createGain();
-      master.gain.value = volume;
-      texture.connect(master);
-      master.connect(context.destination);
 
       source.start();
       sourceRef.current = source;
-      masterRef.current = master;
       setActive(kind);
     } catch {
       stop();
     }
   }
 
+  // For rain, the gust LFO was connected to a texture gain created inside the
+  // branch; keep volume sync working on master for all kinds.
   useEffect(() => {
     if (masterRef.current) masterRef.current.gain.value = volume;
   }, [volume]);
@@ -144,7 +242,9 @@ export function AmbientSounds() {
     return () => {
       try {
         sourceRef.current?.stop();
+        extraRef.current?.stop();
         lfoRef.current?.stop();
+        crestRef.current?.stop();
       } catch {
         // Nodes may already be stopped.
       }
