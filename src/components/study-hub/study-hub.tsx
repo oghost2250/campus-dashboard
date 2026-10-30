@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Camera, FileText, Globe, Image as ImageIcon, Lock, Plus, Trash2, X } from "lucide-react";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
-import { downscaleImage } from "@/lib/browser-store";
+import { downscaleImage, loadPersisted, savePersisted } from "@/lib/browser-store";
 import type { StudyMaterialDTO } from "@/lib/types";
 
 type Privacy = "private" | "public";
@@ -43,7 +43,7 @@ function dtoToMaterial(dto: StudyMaterialDTO): Material {
   };
 }
 
-export function StudyHub() {
+export function StudyHub({ userId }: { userId: string }) {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [selectedCourse, setSelectedCourse] = useState<string>(
     FIRST_YEAR_SUBJECTS[0].code + " - " + FIRST_YEAR_SUBJECTS[0].title,
@@ -69,8 +69,54 @@ export function StudyHub() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  async function migrateLegacy() {
+    const flagKey = `campus-study-hub-migrated:${userId}`;
+    const already = await loadPersisted<boolean>(flagKey);
+    if (already) return;
+
+    const legacyKeys = ["campus-study-hub", `campus-study-hub:${userId}`];
+    for (const key of legacyKeys) {
+      const parsed = await loadPersisted<unknown[]>(key);
+      if (!Array.isArray(parsed)) continue;
+for (const raw of parsed) {
+      const m = raw as {
+        title?: string;
+        course?: string;
+        category?: string;
+        privacy?: string;
+        fileData?: string;
+        fileType?: string;
+      };
+      if (!m || !m.fileData) continue;
+        try {
+          await fetch("/api/study-materials", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              title: m.title || "Untitled",
+              course: m.course,
+              category: m.category || "Lecture Notes",
+              privacy: m.privacy === "public" ? "public" : "private",
+              fileData: m.fileData,
+              fileType: m.fileType || "application/octet-stream",
+            }),
+          });
+        } catch {
+          /* ignore, retry next load */
+        }
+      }
+      try {
+        await savePersisted(key, []);
+      } catch {
+        /* ignore */
+      }
+    }
+    await savePersisted(flagKey, true);
+  }
+
   async function loadMaterials() {
     setLoading(true);
+    await migrateLegacy();
     try {
       const [vaultRes, communityRes] = await Promise.all([
         fetch("/api/study-materials?scope=vault", { cache: "no-store" }),
@@ -95,6 +141,7 @@ export function StudyHub() {
 
   useEffect(() => {
     void loadMaterials();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function togglePrivacy(material: Material) {
