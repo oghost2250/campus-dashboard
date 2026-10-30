@@ -73,6 +73,16 @@ export function WeeklySchedule({
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
 
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
+  const [importTerm, setImportTerm] = useState("Term 1");
+  const [parsedRows, setParsedRows] = useState<
+    { selected: boolean; course: Course }[]
+  >([]);
+  const [skippedCount, setSkippedCount] = useState(0);
+  const [confirmReplaceOpen, setConfirmReplaceOpen] = useState(false);
+  const [pendingImport, setPendingImport] = useState<Course[] | null>(null);
+
   useEffect(() => {
     let active = true;
     void loadSchedule().then((saved) => {
@@ -214,6 +224,158 @@ export function WeeklySchedule({
     closeModal();
   }
 
+  // Register a tiny service worker so the schedule page + its last saved
+  // data (IndexedDB) stay available offline.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* offline support is best-effort */
+    });
+  }, []);
+
+  const DAY_NAMES = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
+  const DAY_ALIASES: Record<string, string> = {
+    sun: "Sunday",
+    mon: "Monday",
+    tue: "Tuesday",
+    wed: "Wednesday",
+    thu: "Thursday",
+    fri: "Friday",
+    sat: "Saturday",
+  };
+
+  function normalizeDay(raw: string): string | null {
+    const lower = raw.trim().toLowerCase().replace(/\.$/, "");
+    if (DAY_ALIASES[lower]) return DAY_ALIASES[lower];
+    const full = DAY_NAMES.find((d) => d.toLowerCase() === lower);
+    return full ?? null;
+  }
+
+  function normalizeTime(raw: string): string | null {
+    const match = raw.trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) return null;
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour > 23 || minute > 59) return null;
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  }
+
+  function parseScheduleText(text: string) {
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const rows: { selected: boolean; course: Course }[] = [];
+    let skipped = 0;
+
+    for (const line of lines) {
+      // Find a day token anywhere in the line.
+      const tokens = line.split(/[\s,;|]+/).filter(Boolean);
+      let day: string | null = null;
+      let dayTokenIndex = -1;
+      for (let i = 0; i < tokens.length; i += 1) {
+        const candidate = normalizeDay(tokens[i]);
+        if (candidate) {
+          day = candidate;
+          dayTokenIndex = i;
+          break;
+        }
+      }
+
+      // Find a time range HH:MM-HH:MM (or en-dash).
+      const timeMatch = line.match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
+      if (!day || !timeMatch) {
+        skipped += 1;
+        continue;
+      }
+
+      const startTime = normalizeTime(timeMatch[1]);
+      const endTime = normalizeTime(timeMatch[2]);
+      if (!startTime || !endTime) {
+        skipped += 1;
+        continue;
+      }
+
+      // Remove the day token and time range from the line to get the rest.
+      const rest = line
+        .replace(timeMatch[0], " ")
+        .replace(new RegExp(`\\b${tokens[dayTokenIndex]}\\b`, "i"), " ")
+        .trim();
+
+      // Heuristics for code / room / instructor / title.
+      const codeMatch = rest.match(/\b([A-Z]{2,}\s?\d{2,4}[A-Z]?)\b/);
+      const code = codeMatch ? codeMatch[1].replace(/\s+/, " ") : "";
+      const roomMatch = rest.match(/(?:room|rm|r\.?)\s*[:#-]?\s*([A-Za-z0-9-]+)/i);
+      const room = roomMatch ? roomMatch[1] : "";
+      const instrMatch = rest.match(/(?:dr\.?|prof\.?|instructor)\s+([A-Za-z][A-Za-z .'-]*)/i);
+      const instructor = instrMatch ? instrMatch[1].trim() : "";
+
+      let title = rest;
+      if (code) title = title.replace(code, " ");
+      if (roomMatch) title = title.replace(roomMatch[0], " ");
+      if (instrMatch) title = title.replace(instrMatch[0], " ");
+      title = title.replace(/\s+/g, " ").trim();
+      if (!title) title = code || "Untitled course";
+
+      const accents: Course["accent"][] = ["indigo", "emerald", "blue", "amber"];
+      const course: Course = {
+        id: `imported-${Date.now()}-${rows.length}`,
+        title,
+        code,
+        day,
+        startTime,
+        endTime,
+        accent: accents[rows.length % accents.length],
+        room,
+        instructor,
+        term: importTerm,
+      };
+
+      rows.push({ selected: true, course });
+    }
+
+    setParsedRows(rows);
+    setSkippedCount(skipped);
+  }
+
+  function handleImportClick() {
+    parseScheduleText(importText);
+  }
+
+  function applyImport() {
+    const chosen = parsedRows.filter((r) => r.selected).map((r) => r.course);
+    if (chosen.length === 0) return;
+    if (courses.length > 0) {
+      setPendingImport(chosen);
+      setConfirmReplaceOpen(true);
+      return;
+    }
+    setCourses(chosen);
+    setImportOpen(false);
+    setImportText("");
+    setParsedRows([]);
+  }
+
+  function confirmReplace() {
+    if (pendingImport) setCourses(pendingImport);
+    setPendingImport(null);
+    setConfirmReplaceOpen(false);
+    setImportOpen(false);
+    setImportText("");
+    setParsedRows([]);
+  }
+
+  function clearSchedule() {
+    if (window.confirm("Clear the entire schedule? This cannot be undone.")) {
+      setCourses([]);
+    }
+  }
+
   return (
     <div className="w-full">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -230,6 +392,24 @@ export function WeeklySchedule({
         >
           <span className="text-base leading-none">+</span>
           Add course
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setImportOpen(true);
+            setParsedRows([]);
+            setSkippedCount(0);
+          }}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-zinc-700"
+        >
+          Import
+        </button>
+        <button
+          type="button"
+          onClick={clearSchedule}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400 transition-colors hover:bg-rose-500/20"
+        >
+          Clear
         </button>
       </div>
 
@@ -529,8 +709,148 @@ export function WeeklySchedule({
           </div>
         </div>
       )}
+{/* Import dialog */}
+      {importOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-200">Import schedule</h3>
+              <button
+                type="button"
+                onClick={() => { setImportOpen(false); setParsedRows([]); }}
+                className="text-gray-500 transition-colors hover:text-gray-200"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <label className="text-[11px] font-medium text-gray-400">Term</label>
+                <select
+                  value={importTerm}
+                  onChange={(event) => setImportTerm(event.target.value)}
+                  className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+                >
+                  {["Term 1", "Term 2", "Term 3", "Summer"].map((term) => (
+                    <option key={term} value={term}>{term}</option>
+                  ))}
+                </select>
+              </div>
+              <textarea
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                placeholder="Paste your schedule here (one class per line)…"
+                className="h-40 w-full rounded-lg border border-zinc-700 bg-zinc-800 p-3 text-xs text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleImportClick}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
+                >
+                  Parse
+                </button>
+                {skippedCount > 0 && (
+                  <span className="text-[11px] text-rose-400">
+                    {skippedCount} row{skippedCount === 1 ? "" : "s"} skipped (unrecognized).
+                  </span>
+                )}
+              </div>
+              {parsedRows.length > 0 && (
+                <div className="max-h-60 overflow-auto rounded-lg border border-zinc-800">
+                  <table className="w-full text-xs text-gray-200">
+                    <thead className="bg-zinc-800 text-gray-400">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left">Use</th>
+                        <th className="px-2 py-1.5 text-left">Course</th>
+                        <th className="px-2 py-1.5 text-left">Day</th>
+                        <th className="px-2 py-1.5 text-left">Time</th>
+                        <th className="px-2 py-1.5 text-left">Room</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedRows.map((row, index) => (
+                        <tr key={index} className="border-t border-zinc-800">
+                          <td className="px-2 py-1.5">
+                            <input
+                              type="checkbox"
+                              checked={row.selected}
+                              onChange={(event) =>
+                                setParsedRows((current) =>
+                                  current.map((r, i) =>
+                                    i === index ? { ...r, selected: event.target.checked } : r,
+                                  ),
+                                )
+                              }
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {row.course.title}
+                            {row.course.code ? " (" + row.course.code + ")" : ""}
+                          </td>
+                          <td className="px-2 py-1.5">{row.course.day}</td>
+                          <td className="px-2 py-1.5">
+                            {row.course.startTime} – {row.course.endTime}
+                          </td>
+                          <td className="px-2 py-1.5">{row.course.room}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {parsedRows.length > 0 && (
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setImportOpen(false); setParsedRows([]); }}
+                    className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-gray-300 transition-colors hover:bg-zinc-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyImport}
+                    className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
+                  >
+                    Import selected
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm replace dialog */}
+      {confirmReplaceOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-2xl">
+            <h3 className="text-sm font-semibold text-gray-200">Replace schedule?</h3>
+            <p className="mt-2 text-xs text-gray-400">
+              This will replace your {courses.length} existing class{courses.length === 1 ? "" : "es"} with the imported ones.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setConfirmReplaceOpen(false); setPendingImport(null); }}
+                className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-gray-300 transition-colors hover:bg-zinc-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmReplace}
+                className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-rose-500"
+              >
+                Replace
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
-
 export default WeeklySchedule;

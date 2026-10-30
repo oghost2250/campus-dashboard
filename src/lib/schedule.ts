@@ -12,6 +12,7 @@ export type ScheduleCourse = {
   accent: ScheduleAccent;
   room?: string;
   instructor?: string;
+  term?: string;
 };
 
 export const SCHEDULE_STORAGE_KEY = "schedule-courses-v1";

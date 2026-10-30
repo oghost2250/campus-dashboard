@@ -24,7 +24,6 @@ type Material = {
   createdAt: number;
 };
 
-const STORAGE_KEY = "campus-study-hub";
 const CURRENT_USER = "You";
 
 const SEED_MATERIALS: Material[] = [
@@ -65,7 +64,8 @@ function isImage(type: string) {
   return type.startsWith("image/");
 }
 
-export function StudyHub() {
+export function StudyHub({ userId }: { userId: string }) {
+  const STORAGE_KEY = `campus-study-hub:${userId}`;
   const [materials, setMaterials] = useState<Material[]>(SEED_MATERIALS);
   const [selectedCourse, setSelectedCourse] = useState<string>(
     FIRST_YEAR_SUBJECTS[0].code + " - " + FIRST_YEAR_SUBJECTS[0].title,
@@ -102,8 +102,7 @@ export function StudyHub() {
     return () => {
       cancelled = true;
     };
-  }, []);
-
+  }, [STORAGE_KEY]);
   // Persist user uploads (debounced so scans do not rewrite on every render).
   useEffect(() => {
     const userUploads = materials.filter(
@@ -120,7 +119,7 @@ export function StudyHub() {
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [materials]);
+  }, [materials, STORAGE_KEY]);
 
   // Camera lifecycle
   useEffect(() => {
