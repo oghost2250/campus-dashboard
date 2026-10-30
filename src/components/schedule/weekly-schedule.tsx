@@ -281,39 +281,52 @@ export function WeeklySchedule({
 
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-[#0a0a0a]">
         <div
-          className="grid min-w-[920px]"
+          className="min-w-[920px]"
           style={{
-            gridTemplateColumns: "84px repeat(7, minmax(128px, 1fr))",
+            display: "grid",
+            gridTemplateColumns: "80px repeat(7, minmax(120px, 1fr))",
             gridTemplateRows: `40px repeat(${HOURS.length}, 64px)`,
           }}
         >
           {/* Corner cell */}
-          <div className="border-b border-r border-white/10 bg-zinc-900/60" />
+          <div
+            className="border-b border-r border-white/10 bg-zinc-900/60"
+            style={{ gridColumn: 1, gridRow: 1 }}
+          />
 
           {/* Day headers */}
-          {DAYS.map((day) => (
+          {DAYS.map((day, index) => (
             <div
               key={day}
               className="flex items-center justify-center border-b border-r border-white/10 bg-zinc-900/60 text-xs font-medium text-gray-300 last:border-r-0"
+              style={{ gridColumn: index + 2, gridRow: 1 }}
             >
               {day}
             </div>
           ))}
 
-          {/* Time labels + empty cells */}
-          {HOURS.map((hour) => (
-            <div key={`row-${hour}`} className="contents">
-              <div className="flex items-start justify-end border-b border-r border-white/10 pr-3 pt-2 text-[11px] tabular-nums text-gray-500">
-                {formatHour(hour)}
-              </div>
-              {DAYS.map((day) => (
-                <div
-                  key={`${day}-${hour}`}
-                  className="border-b border-r border-white/10 last:border-r-0"
-                />
-              ))}
+          {/* Each time label is a direct grid item pinned to the first column. */}
+          {HOURS.map((hour, index) => (
+            <div
+              key={`time-${hour}`}
+              className="flex items-start justify-end border-b border-r border-white/10 pr-3 pt-2 text-right text-xs tabular-nums text-zinc-400"
+              style={{ gridColumn: 1, gridRow: index + 2 }}
+            >
+              {formatHour(hour)}
             </div>
           ))}
+          {HOURS.flatMap((hour, index) =>
+            DAYS.map((day, dayIndex) => (
+              <div
+                key={`${day}-${hour}`}
+                className="border-b border-r border-white/10 last:border-r-0"
+                style={{
+                  gridColumn: dayIndex + 2,
+                  gridRow: index + 2,
+                }}
+              />
+            )),
+          )}
 
           {/* Course cards */}
           {placed.map(({ course, col, rowStart, rowEnd }) => (

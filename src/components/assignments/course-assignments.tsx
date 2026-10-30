@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Clock, ExternalLink, Plus, X } from "lucide-react";
+import { Camera, Clock, ExternalLink, Hourglass, Plus, X } from "lucide-react";
 import { jsPDF } from "jspdf";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
@@ -13,15 +13,24 @@ type Assignment = {
   course: string;
   dueDate: string; // ISO date
   moodleUrl: string | null;
-  createdById: string;
-  createdBy: { name: string | null; email: string | null };
+  createdById: string | null;
+  createdBy: { name: string | null; email: string | null } | null;
   createdAt: string;
+  canDelete: boolean;
 };
 
-function daysUntil(date: string): number {
-  const target = new Date(date);
-  const now = new Date();
-  return Math.ceil((target.getTime() - now.getTime()) / 86400000);
+function countdownLabel(date: string, now: number): string {
+  const remaining = new Date(date).getTime() - now;
+  if (remaining <= 0) return "Overdue";
+
+  const totalMinutes = Math.floor(remaining / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) return `${days}d ${hours}h remaining`;
+  if (hours > 0) return `${hours}h ${minutes}m remaining`;
+  return `${Math.max(minutes, 1)}m remaining`;
 }
 
 function formatDate(date: string): string {
@@ -32,17 +41,11 @@ function formatDate(date: string): string {
   });
 }
 
-function countdownLabel(date: string): string {
-  const remaining = daysUntil(date);
-  if (remaining < 0) return "Urgent — Overdue";
-  if (remaining === 0) return "Urgent — Due today";
-  if (remaining === 1) return "Due in 1 day";
-  return `Due in ${remaining} days`;
-}
-
 export function CourseAssignments() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loadingAssignments, setLoadingAssignments] = useState(true);
+  const [feedError, setFeedError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [activeId, setActiveId] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -52,9 +55,14 @@ export function CourseAssignments() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [addForm, setAddForm] = useState({
+  const [addForm, setAddForm] = useState<{
+    title: string;
+    courseCode: string;
+    dueDate: string;
+    moodleUrl: string;
+  }>({
     title: "",
-    course: FIRST_YEAR_SUBJECTS[0].code + " - " + FIRST_YEAR_SUBJECTS[0].title,
+    courseCode: FIRST_YEAR_SUBJECTS[0].code,
     dueDate: "",
     moodleUrl: "",
   });
@@ -67,17 +75,29 @@ export function CourseAssignments() {
   const activeAssignment = assignments.find((item) => item.id === activeId) ?? null;
 
   useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         const response = await fetch("/api/assignments");
-        if (!response.ok) throw new Error("load failed");
+        if (!response.ok) {
+          const data = (await response.json()) as { error?: string };
+          throw new Error(data.error ?? "Could not load assignments.");
+        }
         const data = (await response.json()) as { assignments?: Assignment[] };
         if (!cancelled && data.assignments) {
           setAssignments(data.assignments);
         }
-      } catch {
-        // Leave empty; empty state will render.
+      } catch (err) {
+        if (!cancelled) {
+          setFeedError(
+            err instanceof Error ? err.message : "Could not load assignments.",
+          );
+        }
       } finally {
         if (!cancelled) setLoadingAssignments(false);
       }
@@ -136,17 +156,31 @@ export function CourseAssignments() {
     setPages((current) => [...current, data]);
   }
 
-  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) return;
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setPages((current) => [...current, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
-    });
     event.target.value = "";
+    try {
+      const images = await Promise.all(
+        files.map(
+          (file) =>
+            new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () =>
+                typeof reader.result === "string"
+                  ? resolve(reader.result)
+                  : reject(new Error(`Could not read ${file.name}.`));
+              reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+              reader.readAsDataURL(file);
+            }),
+        ),
+      );
+      setPages((current) => [...current, ...images]);
+      setPreviewPdf(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not read selected pages.");
+    }
   }
 
   function removePage(index: number) {
@@ -175,7 +209,8 @@ export function CourseAssignments() {
         if (index > 0) pdf.addPage();
         const imgWidth = 190;
         const imgHeight = 270;
-        pdf.addImage(page, "JPEG", 10, 10, imgWidth, imgHeight);
+        const format = page.startsWith("data:image/png") ? "PNG" : "JPEG";
+        pdf.addImage(page, format, 10, 10, imgWidth, imgHeight);
       });
       const url = pdf.output("datauristring");
       setPreviewPdf(url);
@@ -260,18 +295,26 @@ export function CourseAssignments() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: addForm.title.trim(),
-          course: addForm.course.trim(),
-          dueDate: addForm.dueDate,
+          courseCode: addForm.courseCode,
+          dueDate: new Date(addForm.dueDate).toISOString(),
           moodleUrl: addForm.moodleUrl.trim() || null,
         }),
       });
-      if (!response.ok) throw new Error("Create failed");
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Could not create assignment.");
+      }
 
       const data = (await response.json()) as { assignment: Assignment };
-      setAssignments((current) => [data.assignment, ...current]);
+      setAssignments((current) =>
+        [data.assignment, ...current].sort(
+          (left, right) =>
+            new Date(left.dueDate).getTime() - new Date(right.dueDate).getTime(),
+        ),
+      );
       setAddForm({
         title: "",
-        course: FIRST_YEAR_SUBJECTS[0].code + " - " + FIRST_YEAR_SUBJECTS[0].title,
+        courseCode: FIRST_YEAR_SUBJECTS[0].code,
         dueDate: "",
         moodleUrl: "",
       });
@@ -285,10 +328,14 @@ export function CourseAssignments() {
     if (!window.confirm("Delete this assignment for the whole batch?")) return;
     try {
       const response = await fetch(`/api/assignments?id=${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error("Delete failed");
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error ?? "Could not delete assignment.");
+      }
       setAssignments((current) => current.filter((item) => item.id !== id));
-    } catch {
-      setError("Failed to delete assignment.");
+      setFeedError(null);
+    } catch (err) {
+      setFeedError(err instanceof Error ? err.message : "Could not delete assignment.");
     }
   }
 
@@ -297,7 +344,7 @@ export function CourseAssignments() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold tracking-tight text-gray-200">
-            First Year CS Assignments
+            CS 1st Year Batch Assignments Feed
           </h2>
           <p className="text-[11px] text-gray-500">
             Batch-wide assignments for Subjects First Year. Everyone in your
@@ -310,7 +357,7 @@ export function CourseAssignments() {
           className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
         >
           <Plus className="size-3.5" />
-          Add Assignment
+          Add CS Assignment
         </button>
       </div>
 
@@ -322,8 +369,18 @@ export function CourseAssignments() {
         </p>
       </div>
 
+      {feedError && (
+        <p className="text-xs text-rose-400" role="alert">
+          {feedError}
+        </p>
+      )}
+
       {loadingAssignments ? (
         <p className="text-xs text-gray-500">Loading assignments…</p>
+      ) : feedError && assignments.length === 0 ? (
+        <p className="text-xs text-gray-400">
+          The shared feed is unavailable. Refresh the page to try again.
+        </p>
       ) : assignments.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/40 px-6 py-12 text-center">
           <span className="text-2xl">🎉</span>
@@ -335,14 +392,14 @@ export function CourseAssignments() {
             onClick={() => setAddModalOpen(true)}
             className="rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-zinc-700"
           >
-            + Add Assignment
+            + Add CS Assignment
           </button>
         </div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {assignments.map((assignment) => {
-            const remaining = daysUntil(assignment.dueDate);
-            const isUrgent = remaining <= 1;
+            const isOverdue = new Date(assignment.dueDate).getTime() <= now;
+            const courseCode = assignment.course.split(" - ")[0];
             return (
               <div
                 key={assignment.id}
@@ -350,25 +407,33 @@ export function CourseAssignments() {
               >
                 <div className="mb-2 flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-medium text-gray-200">
+                    <span className="mb-1 inline-flex rounded-md border border-sky-400/20 bg-sky-400/10 px-2 py-0.5 text-[10px] font-semibold text-sky-300">
+                      {courseCode}
+                    </span>
+                    <p className="truncate text-sm font-medium text-gray-100">
                       {assignment.title}
                     </p>
-                    <p className="truncate text-[10px] text-gray-500">
-                      {assignment.course}
-                    </p>
-                    <p className="truncate text-[10px] text-gray-400">
-                      By {assignment.createdBy.name ?? assignment.createdBy.email}
-                    </p>
+                    {assignment.createdBy && (
+                      <p className="truncate text-[10px] text-gray-500">
+                        Added by {assignment.createdBy.name ?? assignment.createdBy.email}
+                      </p>
+                    )}
                   </div>
-                  <span className={cn(
-                    "rounded-md px-2 py-0.5 text-[10px] font-medium",
-                    remaining < 0
-                      ? "bg-rose-500/15 text-rose-400"
-                      : isUrgent
-                        ? "bg-amber-500/15 text-amber-300"
-                        : "bg-emerald-500/15 text-emerald-300",
-                  )}>
-                    {countdownLabel(assignment.dueDate)}
+                </div>
+
+                <div
+                  className={cn(
+                    "mb-3 flex items-center gap-2 rounded-lg border px-2.5 py-2",
+                    isOverdue
+                      ? "border-rose-400/20 bg-rose-400/5 text-rose-300"
+                      : "border-sky-400/20 bg-sky-400/5 text-sky-200",
+                  )}
+                  aria-label={`Time remaining: ${countdownLabel(assignment.dueDate, now)}`}
+                >
+                  <Hourglass className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="text-[10px] font-medium">Time remaining</span>
+                  <span className="ml-auto text-[10px] tabular-nums">
+                    {countdownLabel(assignment.dueDate, now)}
                   </span>
                 </div>
 
@@ -385,7 +450,7 @@ export function CourseAssignments() {
                     className="inline-flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-[10px] text-gray-300 transition-colors hover:bg-zinc-700 hover:text-white"
                   >
                     <ExternalLink className="size-3.5" />
-                    View on Moodle
+                    Open in Moodle
                   </a>
                 ) : null}
 
@@ -398,16 +463,12 @@ export function CourseAssignments() {
                     <Camera className="size-3.5" />
                     Submit via Camera / Scanner
                   </button>
-                  {assignment.createdById === undefined || true ? (
+                  {assignment.canDelete ? (
                     <button
                       type="button"
                       onClick={() => deleteAssignment(assignment.id)}
-                      disabled={remaining < 0 ? false : true}
                       className={cn(
                         "w-full mt-2 rounded-lg border border-zinc-700 bg-zinc-800/50 px-2.5 py-1.5 text-[10px] font-medium text-gray-500 transition-colors hover:bg-zinc-700 hover:text-gray-200",
-                        remaining < 0
-                          ? "border-rose-500/30 bg-rose-500/10 text-rose-400"
-                          : "",
                       )}
                     >
                       Delete batch assignment
@@ -460,16 +521,16 @@ export function CourseAssignments() {
                   Course (Subjects First Year)
                 </label>
                 <select
-                  value={addForm.course}
+                  value={addForm.courseCode}
                   onChange={(event) =>
-                    setAddForm((state) => ({ ...state, course: event.target.value }))
+                    setAddForm((state) => ({ ...state, courseCode: event.target.value }))
                   }
                   className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
                 >
                   {FIRST_YEAR_SUBJECTS.map((subject) => (
                     <option
                       key={subject.code}
-                      value={`${subject.code} - ${subject.title}`}
+                      value={subject.code}
                     >
                       {subject.code} - {subject.title}
                     </option>
@@ -584,7 +645,7 @@ export function CourseAssignments() {
                   Upload pages
                   <input
                     type="file"
-                    accept="image/*,application/pdf"
+                    accept="image/jpeg,image/png"
                     multiple
                     onChange={handleFileChange}
                     className="hidden"
@@ -692,7 +753,27 @@ export function CourseAssignments() {
               </p>
             )}
 
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {previewPdf && (
+                <a
+                  href={previewPdf}
+                  download={`${activeAssignment.title.replace(/[^\w.-]+/g, "-")}.pdf`}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs font-medium text-gray-200 transition-colors hover:bg-zinc-700"
+                >
+                  Download PDF
+                </a>
+              )}
+              {activeAssignment.moodleUrl && (
+                <a
+                  href={activeAssignment.moodleUrl}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-400/30 bg-sky-400/10 px-3 py-2 text-xs font-medium text-sky-200 transition-colors hover:bg-sky-400/20"
+                >
+                  <ExternalLink className="size-3.5" />
+                  Go to Moodle Submission Page
+                </a>
+              )}
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}

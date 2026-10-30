@@ -326,11 +326,11 @@ model Assignment {
   course      String
   dueDate     DateTime
   moodleUrl   String?
-  createdById String
+  createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  createdBy User   @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([course])
   @@index([createdAt])
