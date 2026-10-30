@@ -2,6 +2,7 @@ export type AssessmentLike = {
   weight: number;
   score: number | null;
   maxScore: number | null;
+  type?: string;
 };
 
 export type GradeBand = {
@@ -55,6 +56,12 @@ export type CourseStats = {
   impossible: boolean;
   letter: string | null;
   points: number | null;
+  /** Percentage needed on ungraded final exams specifically. */
+  finalWeight: number;
+  finalRequiredPercent: number | null;
+  finalAssumedPercent: number | null;
+  hasFinal: boolean;
+  finalGraded: boolean;
 };
 
 export function computeCourseStats(
@@ -64,16 +71,21 @@ export function computeCourseStats(
   const totalWeight = assessments.reduce((sum, item) => sum + (item.weight || 0), 0);
 
   let gradedWeight = 0;
+  let ungradedWeight = 0;
   let earnedWeighted = 0;
 
   for (const item of assessments) {
-    if (item.score === null || item.score === undefined) continue;
+    if (item.score === null || item.score === undefined) {
+      ungradedWeight += item.weight || 0;
+      continue;
+    }
     const max = item.maxScore && item.maxScore > 0 ? item.maxScore : 100;
     gradedWeight += item.weight || 0;
     earnedWeighted += ((item.weight || 0) * item.score) / max;
   }
 
-  const remainingWeight = Math.max(0, 100 - totalWeight);
+  const unallocatedWeight = Math.max(0, 100 - totalWeight);
+  const remainingWeight = ungradedWeight + unallocatedWeight;
   const currentPercent = gradedWeight > 0 ? (earnedWeighted / gradedWeight) * 100 : null;
 
   const targetPercent = percentForLetter(targetLetter);
@@ -81,6 +93,32 @@ export function computeCourseStats(
   let neededOnRemaining: number | null = null;
   if (targetPercent !== null && remainingWeight > 0) {
     neededOnRemaining = ((targetPercent - earnedWeighted) / remainingWeight) * 100;
+  }
+
+  const finalAssessments = assessments.filter(
+    (item) => (item.type ?? "").toUpperCase() === "FINAL",
+  );
+  const finalGraded = finalAssessments.some(
+    (item) => item.score !== null && item.score !== undefined,
+  );
+  const finalWeight = finalAssessments.reduce(
+    (sum, item) =>
+      item.score === null || item.score === undefined
+        ? sum + (item.weight || 0)
+        : sum,
+    0,
+  );
+
+  const finalAssumedPercent = currentPercent ?? 0;
+  let finalRequiredPercent: number | null = null;
+  if (targetPercent !== null && finalWeight > 0) {
+    const otherRemainingWeight = Math.max(0, remainingWeight - finalWeight);
+    finalRequiredPercent =
+      ((targetPercent -
+        earnedWeighted -
+        (otherRemainingWeight * finalAssumedPercent) / 100) /
+        finalWeight) *
+      100;
   }
 
   const projectedPercent =
@@ -105,6 +143,11 @@ export function computeCourseStats(
       targetPercent !== null && neededOnRemaining !== null && neededOnRemaining > 100,
     letter: band?.letter ?? null,
     points: band?.points ?? null,
+    finalWeight,
+    finalRequiredPercent,
+    finalAssumedPercent: finalWeight > 0 ? finalAssumedPercent : null,
+    hasFinal: finalAssessments.length > 0,
+    finalGraded,
   };
 }
 
@@ -113,8 +156,11 @@ export type GpaCourse = {
   stats: CourseStats;
 };
 
-/** Credit-weighted GPA on a 4.0 scale, ignoring courses with no graded work. */
-export function computeGpa(courses: GpaCourse[]): {
+/** Credit-weighted GPA, ignoring courses with no graded work. */
+export function computeGpa(
+  courses: GpaCourse[],
+  scale: number = 4,
+): {
   gpa: number | null;
   gradedCredits: number;
   percent: number | null;
@@ -122,11 +168,12 @@ export function computeGpa(courses: GpaCourse[]): {
   let points = 0;
   let credits = 0;
   let weightedPercent = 0;
+  const multiplier = scale === 5 ? 1.25 : 1;
 
   for (const course of courses) {
     if (course.stats.currentPercent === null || course.stats.points === null) continue;
     const weight = Math.max(0, course.credits);
-    points += course.stats.points * weight;
+    points += course.stats.points * weight * multiplier;
     weightedPercent += course.stats.currentPercent * weight;
     credits += weight;
   }
@@ -140,4 +187,31 @@ export function computeGpa(courses: GpaCourse[]): {
     gradedCredits: credits,
     percent: Math.round((weightedPercent / credits) * 10) / 10,
   };
+}
+
+/**
+ * GPA if every course lands exactly on its target grade, weighted by the
+ * course credit hours. Courses without a target fall back to their projection.
+ */
+export function computeTargetGpa(
+  courses: GpaCourse[],
+  scale: number = 4,
+): number | null {
+  const multiplier = scale === 5 ? 1.25 : 1;
+  let points = 0;
+  let credits = 0;
+
+  for (const course of courses) {
+    const percent =
+      course.stats.targetPercent ??
+      course.stats.projectedPercent ??
+      course.stats.currentPercent;
+    if (percent === null) continue;
+    const weight = Math.max(0, course.credits);
+    points += bandFor(percent).points * weight * multiplier;
+    credits += weight;
+  }
+
+  if (credits === 0) return null;
+  return Math.round((points / credits) * 100) / 100;
 }

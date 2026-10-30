@@ -11,5 +11,15 @@ export function generateMetadata(): Promise<Metadata> {
 export default async function SettingsPage() {
   const user = await requireUser();
 
-  return <SettingsView user={user} />;
+  return (
+    <SettingsView
+      user={{
+        name: user.name,
+        email: user.email,
+        image: user.image,
+        gpaScale: user.gpaScale,
+        isDeveloper: user.isDeveloper,
+      }}
+    />
+  );
 }

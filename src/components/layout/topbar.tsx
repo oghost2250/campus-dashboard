@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import type { UserRole } from "@prisma/client";
 import { Menu } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,8 @@ export type ShellUser = {
   name: string | null;
   email: string;
   image: string | null;
-  role: "USER" | "ADMIN";
+  isDeveloper: boolean;
+  role: UserRole;
 };
 
 function usePageTitle() {

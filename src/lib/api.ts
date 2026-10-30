@@ -5,6 +5,7 @@ import type { UserRole, UserStatus } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { hasRole } from "@/lib/roles";
 
 /**
  * Short-lived per-instance cache for the "is this account active?" read.
@@ -70,8 +71,10 @@ export async function requireUserId(): Promise<string | null> {
 
 export type ApiAdmin = { id: string; role: UserRole };
 
-/** Returns the signed-in admin, or null for everyone else. Always fresh. */
-export async function requireAdminUserId(): Promise<ApiAdmin | null> {
+/** Returns the signed-in account with at least `minimum`, or null. Fresh read. */
+export async function requireRoleUserId(
+  minimum: UserRole,
+): Promise<ApiAdmin | null> {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
@@ -81,18 +84,25 @@ export async function requireAdminUserId(): Promise<ApiAdmin | null> {
     select: { id: true, role: true, status: true },
   });
 
-  if (!user || user.status !== "ACTIVE" || user.role !== "ADMIN") return null;
+  if (!user || user.status !== "ACTIVE" || !hasRole(user.role, minimum)) {
+    return null;
+  }
 
   return { id: user.id, role: user.role };
 }
 
-/** True when the user is an active admin. Used for moderation (delete) paths. */
+/** Returns the signed-in admin (or super admin), or null. Always fresh. */
+export async function requireAdminUserId(): Promise<ApiAdmin | null> {
+  return requireRoleUserId("ADMIN");
+}
+
+/** True when the user is an active admin or super admin. */
 export async function isAdminUser(id: string): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id },
     select: { role: true, status: true },
   });
-  return Boolean(user && user.status === "ACTIVE" && user.role === "ADMIN");
+  return Boolean(user && user.status === "ACTIVE" && hasRole(user.role, "ADMIN"));
 }
 
 export function unauthorized() {

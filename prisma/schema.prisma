@@ -22,10 +22,11 @@ datasource db {
 // Auth (NextAuth v5 / Auth.js — field names are dictated by @auth/prisma-adapter)
 // ---------------------------------------------------------------------------
 
-/// Admin = can verify/manage accounts. User = regular student workspace.
+/// Super admin = manages admins. Admin = manages students. User = workspace.
 enum UserRole {
   USER
   ADMIN
+  SUPER_ADMIN
 }
 
 /// New accounts start PENDING and wait for an admin to approve them.
@@ -43,6 +44,8 @@ model User {
   image         String?
   passwordHash  String? // null for OAuth-only accounts
   locale        String     @default("en") // "en" | "ar"
+  gpaScale      Int? // null until the student picks 4 or 5
+  isDeveloper   Boolean    @default(false)
   role          UserRole   @default(USER)
   status        UserStatus @default(PENDING)
   approvedAt    DateTime? // set when an admin first activates the account
@@ -62,10 +65,30 @@ model User {
   assignments    Assignment[]
   moodleToken    String?
   moodleUrl      String?
+  auditEntries   AuditLog[] @relation("AuditActor")
+  auditTargets   AuditLog[] @relation("AuditTarget")
 
   // Admin directory is ordered by status then recency; this keeps that scan cheap.
   @@index([status, createdAt])
   @@map("users")
+}
+
+/// Append-only record of administrative actions. Metadata stores account
+/// fields only (email, role, status), never user-created content.
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  targetId  String?
+  action    String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  actor  User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  target User? @relation("AuditTarget", fields: [targetId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([targetId])
+  @@map("audit_logs")
 }
 
 model Account {

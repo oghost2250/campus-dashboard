@@ -3,6 +3,7 @@ import type {
   Course,
   Note,
   PomodoroSession,
+  Prisma,
   Project,
   Snippet,
   SyllabusTopic,
@@ -135,15 +136,23 @@ export type AdminUserRecord = {
   image: string | null;
   role: UserRole;
   status: UserStatus;
+  emailVerified: Date | null;
   approvedAt: Date | null;
   createdAt: Date;
-  _count: {
-    tasks: number;
-    courses: number;
-    snippets: number;
-    notes: number;
-  };
 };
+
+/** Account fields safe to send to an admin. Never includes content or secrets. */
+export const adminUserSelect = {
+  id: true,
+  name: true,
+  email: true,
+  image: true,
+  role: true,
+  status: true,
+  emailVerified: true,
+  approvedAt: true,
+  createdAt: true,
+} satisfies Prisma.UserSelect;
 
 export function adminUserDTO(user: AdminUserRecord): AdminUserDTO {
   return {
@@ -153,13 +162,8 @@ export function adminUserDTO(user: AdminUserRecord): AdminUserDTO {
     image: user.image,
     role: user.role,
     status: user.status,
+    emailVerified: iso(user.emailVerified),
     approvedAt: iso(user.approvedAt),
     createdAt: user.createdAt.toISOString(),
-    counts: {
-      tasks: user._count.tasks,
-      courses: user._count.courses,
-      snippets: user._count.snippets,
-      notes: user._count.notes,
-    },
   };
 }

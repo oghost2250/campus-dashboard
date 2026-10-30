@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { endOfWeek, startOfToday } from "@/lib/format";
 import { pageMetadata } from "@/lib/metadata";
-import { taskDTO, snippetDTO } from "@/lib/serialize";
+import { computeCourseStats, computeGpa } from "@/lib/gpa";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 
 export function generateMetadata(): Promise<Metadata> {
@@ -16,17 +16,30 @@ export default async function DashboardPage() {
   const today = startOfToday();
   const weekEnd = endOfWeek();
 
-  const [tasks, snippets, snippetCount, focus] = await Promise.all([
+  const [tasks, courses, focus] = await Promise.all([
     prisma.task.findMany({
       where: { userId: user.id },
       orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
     }),
-    prisma.snippet.findMany({
+    prisma.course.findMany({
       where: { userId: user.id },
-      orderBy: { updatedAt: "desc" },
-      take: 3,
+      select: {
+        name: true,
+        credits: true,
+        targetGrade: true,
+        assessments: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            weight: true,
+            score: true,
+            maxScore: true,
+            dueDate: true,
+          },
+        },
+      },
     }),
-    prisma.snippet.count({ where: { userId: user.id } }),
     prisma.pomodoroSession.aggregate({
       where: {
         userId: user.id,
@@ -46,10 +59,49 @@ export default async function DashboardPage() {
 
   const completed = tasks.filter((task) => task.status === "DONE").length;
 
-  const upcoming = openTasks
+  const { gpa } = computeGpa(
+    courses.map((course) => ({
+      credits: course.credits,
+      stats: computeCourseStats(course.assessments, course.targetGrade),
+    })),
+    user.gpaScale === 5 ? 5 : 4,
+  );
+
+  const taskDeadlines = openTasks
     .filter((task) => task.dueDate !== null)
-    .slice(0, 5)
-    .map(taskDTO);
+    .map((task) => ({
+      key: `task-${task.id}`,
+      title: task.title,
+      subtitle: task.subject,
+      dueDate: task.dueDate as Date,
+      kind: "task" as const,
+      type: null,
+    }));
+
+  const assessmentDeadlines = courses.flatMap((course) =>
+    course.assessments
+      .filter((assessment) => assessment.dueDate !== null)
+      .map((assessment) => ({
+        key: `assessment-${assessment.id}`,
+        title: assessment.name,
+        subtitle: course.name,
+        dueDate: assessment.dueDate as Date,
+        kind: "assessment" as const,
+        type: assessment.type,
+      })),
+  );
+
+  const allDeadlines = [...taskDeadlines, ...assessmentDeadlines].sort(
+    (a, b) => a.dueDate.getTime() - b.dueDate.getTime(),
+  );
+
+  const upcoming = allDeadlines.filter((item) => item.dueDate >= today);
+  const nextDeadline = upcoming[0] ?? null;
+
+  const thisWeek = upcoming
+    .filter((item) => item.dueDate <= weekEnd)
+    .slice(0, 6)
+    .map((item) => ({ ...item, dueDate: item.dueDate.toISOString() }));
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
@@ -62,12 +114,21 @@ export default async function DashboardPage() {
       stats={{
         dueThisWeek,
         completed,
-        snippetCount,
+        gpa,
         focusMinutes: focus._sum.durationMinutes ?? 0,
         focusSessions: focus._count,
       }}
-      upcoming={upcoming}
-      recentSnippets={snippets.map(snippetDTO)}
+      nextDeadline={
+        nextDeadline
+          ? { ...nextDeadline, dueDate: nextDeadline.dueDate.toISOString() }
+          : null
+      }
+      thisWeek={thisWeek}
+      onboarding={{
+        courses: courses.length > 0,
+        assignment: tasks.length > 0,
+        gpaScale: user.gpaScale !== null,
+      }}
     />
   );
 }

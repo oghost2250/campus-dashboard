@@ -112,7 +112,7 @@ export type PomodoroDTO = {
 export type StatsDTO = {
   dueThisWeek: number;
   completed: number;
-  snippetCount: number;
+  gpa: number | null;
   focusMinutes: number;
   focusSessions: number;
 };
@@ -124,14 +124,17 @@ export type AdminUserDTO = {
   image: string | null;
   role: UserRole;
   status: UserStatus;
+  emailVerified: string | null;
   approvedAt: string | null;
   createdAt: string;
-  counts: {
-    tasks: number;
-    courses: number;
-    snippets: number;
-    notes: number;
-  };
+};
+
+export type AdminAuditDTO = {
+  id: string;
+  action: string;
+  actor: string | null;
+  target: string | null;
+  createdAt: string;
 };
 
 export type AdminStatsDTO = {

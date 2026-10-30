@@ -8,9 +8,20 @@ export const pomodoroInputSchema = z.object({
   endedAt: z.string().optional().nullable(),
 });
 
-export const profileInputSchema = z.object({
-  name: z.string().trim().min(2, "Name is too short").max(80),
-  locale: z.enum(["en", "ar"]).optional(),
-});
+export const profileInputSchema = z
+  .object({
+    name: z.string().trim().min(2, "Name is too short").max(80).optional(),
+    locale: z.enum(["en", "ar"]).optional(),
+    gpaScale: z.union([z.literal(4), z.literal(5)]).nullable().optional(),
+    isDeveloper: z.boolean().optional(),
+  })
+  .refine(
+    (data) =>
+      data.name !== undefined ||
+      data.locale !== undefined ||
+      data.gpaScale !== undefined ||
+      data.isDeveloper !== undefined,
+    { message: "Nothing to update" },
+  );
 
 export type ProfileInput = z.infer<typeof profileInputSchema>;

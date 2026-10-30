@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   Check,
+  Code2,
+  GraduationCap,
   Languages,
   Loader2,
   Lock,
@@ -24,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/i18n/provider";
 import { signOutAction } from "@/app/actions/auth";
 import type { Locale } from "@/i18n/config";
@@ -46,7 +49,13 @@ function initials(name: string | null, email: string) {
 export function SettingsView({
   user,
 }: {
-  user: { name: string | null; email: string; image: string | null };
+  user: {
+    name: string | null;
+    email: string;
+    image: string | null;
+    gpaScale: number | null;
+    isDeveloper: boolean;
+  };
 }) {
   const { t, locale, setLocale } = useI18n();
   const router = useRouter();
@@ -55,6 +64,12 @@ export function SettingsView({
   const [mounted, setMounted] = useState(false);
   const [name, setName] = useState(user.name ?? "");
   const [saving, setSaving] = useState(false);
+  const [gpaScale, setGpaScale] = useState<4 | 5 | null>(
+    user.gpaScale === 4 || user.gpaScale === 5 ? user.gpaScale : null,
+  );
+  const [savingScale, setSavingScale] = useState<4 | 5 | null>(null);
+  const [isDeveloper, setIsDeveloper] = useState(user.isDeveloper);
+  const [savingDeveloper, setSavingDeveloper] = useState(false);
 
   useEffect(() => setMounted(true), []);
 
@@ -85,6 +100,48 @@ export function SettingsView({
 
   function chooseLocale(next: Locale) {
     setLocale(next);
+  }
+
+  async function chooseGpaScale(value: 4 | 5) {
+    const previous = gpaScale;
+    setGpaScale(value);
+    setSavingScale(value);
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gpaScale: value }),
+      });
+      if (!response.ok) throw new Error("request failed");
+      toast.success(t.settings.saved);
+      router.refresh();
+    } catch {
+      setGpaScale(previous);
+      toast.error(t.common.error);
+    } finally {
+      setSavingScale(null);
+    }
+  }
+
+  async function toggleDeveloper(next: boolean) {
+    const previous = isDeveloper;
+    setIsDeveloper(next);
+    setSavingDeveloper(true);
+    try {
+      const response = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDeveloper: next }),
+      });
+      if (!response.ok) throw new Error("request failed");
+      toast.success(t.settings.saved);
+      router.refresh();
+    } catch {
+      setIsDeveloper(previous);
+      toast.error(t.common.error);
+    } finally {
+      setSavingDeveloper(false);
+    }
   }
 
   const themeLabels: Record<(typeof themes)[number]["value"], string> = {
@@ -237,6 +294,82 @@ export function SettingsView({
 
           <p className="mt-3 text-[11px] text-muted-foreground">
             {t.settings.themeHint}
+          </p>
+        </section>
+
+        <section className="rounded-2xl border border-border/70 bg-card/70 p-5 shadow-soft backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <GraduationCap className="size-4 text-primary" />
+            <h2 className="text-sm font-semibold tracking-tight">
+              {t.settings.gpaScaleTitle}
+            </h2>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t.settings.gpaScaleSubtitle}
+          </p>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            {([4, 5] as const).map((value) => {
+              const active = gpaScale === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => chooseGpaScale(value)}
+                  disabled={savingScale !== null}
+                  aria-pressed={active}
+                  className={cn(
+                    "flex items-center justify-between rounded-xl border px-3 py-2.5 transition-all disabled:opacity-60",
+                    active
+                      ? "border-primary/50 bg-primary/5 ring-1 ring-primary/20"
+                      : "border-border/70 hover:border-border hover:bg-muted/40",
+                  )}
+                >
+                  <span className="text-sm font-medium">{value}.0</span>
+                  {savingScale === value ? (
+                    <Loader2 className="size-3.5 animate-spin text-primary" />
+                  ) : active ? (
+                    <Check className="size-3.5 text-primary" />
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            {t.settings.gpaScaleHint}
+          </p>
+        </section>
+
+        <section className="rounded-2xl border border-border/70 bg-card/70 p-5 shadow-soft backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <Code2 className="size-4 text-primary" />
+            <h2 className="text-sm font-semibold tracking-tight">
+              {t.settings.developerTitle}
+            </h2>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t.settings.developerSubtitle}
+          </p>
+
+          <label className="mt-4 flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-border/70 px-3 py-3">
+            <span className="text-sm font-medium">
+              {t.settings.developerToggle}
+            </span>
+            <span className="flex items-center gap-2">
+              {savingDeveloper ? (
+                <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+              ) : null}
+              <Switch
+                checked={isDeveloper}
+                onCheckedChange={toggleDeveloper}
+                disabled={savingDeveloper}
+              />
+            </span>
+          </label>
+
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            {t.settings.developerHint}
           </p>
         </section>
 

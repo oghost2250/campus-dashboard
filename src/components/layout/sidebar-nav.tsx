@@ -6,22 +6,25 @@ import { motion } from "framer-motion";
 import { GraduationCap, ShieldCheck } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { navGroupsForRole } from "@/lib/nav";
+import { navGroupsForUser } from "@/lib/nav";
+import type { UserRole } from "@prisma/client";
 import { useI18n } from "@/i18n/provider";
 
 export function SidebarNav({
   scope,
   role,
+  isDeveloper,
   onNavigate,
 }: {
   /** Unique per mounted instance so layoutId animations don't collide. */
   scope: string;
-  role: "USER" | "ADMIN";
+  role: UserRole;
+  isDeveloper: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
   const { t } = useI18n();
-  const groups = navGroupsForRole(role);
+  const groups = navGroupsForUser(role, isDeveloper);
 
   return (
     <div className="flex h-full flex-col gap-6 p-4">

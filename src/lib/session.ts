@@ -6,6 +6,7 @@ import type { UserRole, UserStatus } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { hasRole } from "@/lib/roles";
 import { LOCALE_COOKIE, defaultLocale, isLocale, type Locale } from "@/i18n/config";
 
 export async function getLocale(): Promise<Locale> {
@@ -19,6 +20,8 @@ export type SessionUser = {
   name: string | null;
   email: string;
   image: string | null;
+  gpaScale: number | null;
+  isDeveloper: boolean;
   role: UserRole;
   status: UserStatus;
   approvedAt: Date | null;
@@ -43,6 +46,8 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
       name: true,
       email: true,
       image: true,
+      gpaScale: true,
+      isDeveloper: true,
       role: true,
       status: true,
       approvedAt: true,
@@ -72,13 +77,18 @@ export async function requireUser(): Promise<SessionUser> {
   return user;
 }
 
-/** Pages and layouts that only admins may open. */
-export async function requireAdmin(): Promise<SessionUser> {
+/** Pages and layouts that require a minimum role (admin or super admin). */
+export async function requireRole(minimum: UserRole): Promise<SessionUser> {
   const user = await requireUser();
 
-  if (user.role !== "ADMIN") {
+  if (!hasRole(user.role, minimum)) {
     redirect("/dashboard");
   }
 
   return user;
+}
+
+/** Pages and layouts that only admins (or super admins) may open. */
+export async function requireAdmin(): Promise<SessionUser> {
+  return requireRole("ADMIN");
 }

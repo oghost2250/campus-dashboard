@@ -9,18 +9,14 @@ import {
   readJson,
   requireAdminUserId,
 } from "@/lib/api";
-import { adminUserDTO } from "@/lib/serialize";
+import { recordAudit } from "@/lib/audit";
+import { hasRole } from "@/lib/roles";
+import { adminUserDTO, adminUserSelect } from "@/lib/serialize";
 import { adminCreateUserSchema } from "@/lib/validations/admin";
 import type { AdminUsersResponse } from "@/lib/types";
 
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 200;
-
-const userInclude = {
-  _count: {
-    select: { tasks: true, courses: true, snippets: true, notes: true },
-  },
-} as const;
 
 function parseEnum<T extends string>(
   values: readonly T[],
@@ -34,6 +30,7 @@ function parseEnum<T extends string>(
  *
  * Paginated because the section can hold thousands of students; the admin UI
  * loads further pages on demand instead of transferring the whole directory.
+ * Only account fields are selected — never another user's workspace content.
  */
 export async function GET(request: Request) {
   const admin = await requireAdminUserId();
@@ -72,14 +69,14 @@ export async function GET(request: Request) {
         orderBy: [{ status: "asc" }, { createdAt: "desc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: userInclude,
+        select: adminUserSelect,
       }),
       prisma.user.count(),
       prisma.user.count({ where }),
       prisma.user.count({ where: { status: "PENDING" } }),
       prisma.user.count({ where: { status: "ACTIVE" } }),
       prisma.user.count({ where: { status: "SUSPENDED" } }),
-      prisma.user.count({ where: { role: "ADMIN" } }),
+      prisma.user.count({ where: { role: { in: ["ADMIN", "SUPER_ADMIN"] } } }),
     ]);
 
   const payload: AdminUsersResponse = {
@@ -106,6 +103,14 @@ export async function POST(request: Request) {
 
   const { name, email, password, role, status } = parsed.data;
 
+  if (role === "SUPER_ADMIN") {
+    return forbidden("SUPER_ADMIN_PROMOTION_ONLY");
+  }
+
+  if (!hasRole(admin.role, "SUPER_ADMIN") && role !== "USER") {
+    return forbidden("SUPER_ADMIN_ONLY");
+  }
+
   try {
     const passwordHash = await bcrypt.hash(password, 12);
 
@@ -119,7 +124,14 @@ export async function POST(request: Request) {
         approvedAt: status === "ACTIVE" ? new Date() : null,
         emailVerified: status === "ACTIVE" ? new Date() : null,
       },
-      include: userInclude,
+      select: adminUserSelect,
+    });
+
+    await recordAudit({
+      actorId: admin.id,
+      targetId: user.id,
+      action: "USER_CREATED",
+      metadata: { email: user.email, role: user.role, status: user.status },
     });
 
     return NextResponse.json({ user: adminUserDTO(user) }, { status: 201 });

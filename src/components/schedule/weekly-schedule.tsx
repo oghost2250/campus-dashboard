@@ -1,28 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-type Accent = "indigo" | "emerald" | "blue" | "amber";
-
-type Course = {
-  id: string;
-  title: string;
-  code: string;
-  day: string;
-  startTime: string;
-  endTime: string;
-  accent: Accent;
-};
-
-const DAYS = [
-  "Sunday",
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-] as const;
+import {
+  loadSchedule,
+  saveSchedule,
+  SCHEDULE_DAYS as DAYS,
+  type ScheduleAccent as Accent,
+  type ScheduleCourse as Course,
+} from "@/lib/schedule";
 
 const START_HOUR = 7;
 const END_HOUR = 18; // 6 PM (12 hourly rows, 7 PM end)
@@ -53,63 +39,6 @@ const accentBorder: Record<Accent, string> = {
   amber: "border-l-amber-500",
 };
 
-const MOCK_COURSES: Course[] = [
-  {
-    id: "c1",
-    title: "Data Structures",
-    code: "CSAI 211",
-    day: "Monday",
-    startTime: "09:00",
-    endTime: "11:00",
-    accent: "indigo",
-  },
-  {
-    id: "c2",
-    title: "Operating Systems",
-    code: "CSAI 340",
-    day: "Monday",
-    startTime: "13:00",
-    endTime: "14:00",
-    accent: "emerald",
-  },
-  {
-    id: "c3",
-    title: "Linear Algebra",
-    code: "MATH 241",
-    day: "Tuesday",
-    startTime: "10:00",
-    endTime: "12:00",
-    accent: "indigo",
-  },
-  {
-    id: "c4",
-    title: "Database Systems",
-    code: "CS 361",
-    day: "Wednesday",
-    startTime: "14:00",
-    endTime: "16:00",
-    accent: "amber",
-  },
-  {
-    id: "c5",
-    title: "Technical Writing",
-    code: "ENGL 102",
-    day: "Thursday",
-    startTime: "08:00",
-    endTime: "09:00",
-    accent: "blue",
-  },
-  {
-    id: "c6",
-    title: "Algorithms Lab",
-    code: "CS 220",
-    day: "Friday",
-    startTime: "11:00",
-    endTime: "13:00",
-    accent: "emerald",
-  },
-];
-
 const emptyForm = {
   title: "",
   code: "",
@@ -117,6 +46,8 @@ const emptyForm = {
   startTime: "08:00",
   endTime: "09:00",
   accent: "indigo" as Accent,
+  room: "",
+  instructor: "",
 };
 
 function toMinutes(time: string): number {
@@ -131,15 +62,32 @@ function formatHour(hour: number): string {
 }
 
 export function WeeklySchedule({
-  initialCourses = MOCK_COURSES,
+  initialCourses = [],
 }: {
   initialCourses?: Course[];
 }) {
   const [courses, setCourses] = useState<Course[]>(initialCourses);
+  const [hydrated, setHydrated] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void loadSchedule().then((saved) => {
+      if (!active) return;
+      setCourses(saved);
+      setHydrated(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (hydrated) void saveSchedule(courses);
+  }, [courses, hydrated]);
 
   const dayIndex = useMemo(() => {
     const map = new Map<string, number>();
@@ -198,6 +146,8 @@ export function WeeklySchedule({
       startTime: course.startTime,
       endTime: course.endTime,
       accent: course.accent,
+      room: course.room ?? "",
+      instructor: course.instructor ?? "",
     });
     setError(null);
     setModalOpen(true);
@@ -232,6 +182,8 @@ export function WeeklySchedule({
                 startTime: form.startTime,
                 endTime: form.endTime,
                 accent: form.accent,
+                room: form.room.trim(),
+                instructor: form.instructor.trim(),
               }
             : course,
         ),
@@ -247,6 +199,8 @@ export function WeeklySchedule({
           startTime: form.startTime,
           endTime: form.endTime,
           accent: form.accent,
+          room: form.room.trim(),
+          instructor: form.instructor.trim(),
         },
       ]);
     }
@@ -411,6 +365,40 @@ export function WeeklySchedule({
                   placeholder="e.g. CSAI 112"
                   className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-gray-400">
+                    Room
+                  </label>
+                  <input
+                    type="text"
+                    value={form.room}
+                    onChange={(event) =>
+                      setForm((state) => ({ ...state, room: event.target.value }))
+                    }
+                    placeholder="e.g. B-204"
+                    className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-medium text-gray-400">
+                    Instructor
+                  </label>
+                  <input
+                    type="text"
+                    value={form.instructor}
+                    onChange={(event) =>
+                      setForm((state) => ({
+                        ...state,
+                        instructor: event.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Dr. Hassan"
+                    className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white placeholder:text-gray-500 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
               </div>
 
               <div className="space-y-1.5">

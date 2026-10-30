@@ -55,7 +55,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useI18n } from "@/i18n/provider";
-import { computeCourseStats, computeGpa, gradeScale } from "@/lib/gpa";
+import {
+  computeCourseStats,
+  computeGpa,
+  computeTargetGpa,
+  gradeScale,
+} from "@/lib/gpa";
 import { toDateInputValue } from "@/lib/format";
 import type { AssessmentDTO, CourseDTO } from "@/lib/types";
 import type { AssessmentType } from "@/lib/validations/course";
@@ -111,7 +116,13 @@ function percent(value: number | null, digits = 1) {
   return `${value.toFixed(digits).replace(/\.0$/, "")}%`;
 }
 
-export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }) {
+export function GpaWorkspace({
+  initialCourses,
+  gpaScale = 4,
+}: {
+  initialCourses: CourseDTO[];
+  gpaScale?: 4 | 5;
+}) {
   const { t } = useI18n();
 
   const [courses, setCourses] = useState(initialCourses);
@@ -157,8 +168,21 @@ export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }
           credits: course.credits,
           stats: computeCourseStats(course.assessments, course.targetGrade),
         })),
+        gpaScale,
       ),
-    [courses],
+    [courses, gpaScale],
+  );
+
+  const targetOverall = useMemo(
+    () =>
+      computeTargetGpa(
+        courses.map((course) => ({
+          credits: course.credits,
+          stats: computeCourseStats(course.assessments, course.targetGrade),
+        })),
+        gpaScale,
+      ),
+    [courses, gpaScale],
   );
 
   function openCreateCourse() {
@@ -396,7 +420,7 @@ export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }
               <p className="text-3xl font-semibold leading-tight tabular-nums tracking-tight">
                 {overall.gpa === null ? "—" : overall.gpa.toFixed(2)}
                 <span className="ms-1 text-xs font-normal text-muted-foreground">
-                  / 4.0
+                  / {gpaScale}.0
                 </span>
               </p>
             </div>
@@ -409,6 +433,17 @@ export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }
               </p>
               <p className="text-base font-semibold tabular-nums">
                 {percent(overall.percent)}
+              </p>
+            </div>
+            <div title={t.gpa.targetGpaHint}>
+              <p className="text-[11px] text-muted-foreground">
+                {t.gpa.targetGpa}
+              </p>
+              <p className="text-base font-semibold tabular-nums">
+                {targetOverall === null ? "—" : targetOverall.toFixed(2)}
+                <span className="ms-1 text-[11px] font-normal text-muted-foreground">
+                  / {gpaScale}.0
+                </span>
               </p>
             </div>
             <div>
@@ -526,7 +561,7 @@ export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }
                     </DropdownMenu>
                   </div>
 
-                  <div className="grid grid-cols-3 divide-x divide-border/60 border-b border-border/60 text-center">
+                  <div className="grid grid-cols-2 divide-x divide-y divide-border/60 border-b border-border/60 text-center sm:grid-cols-4 sm:divide-y-0">
                     <div className="px-2 py-2.5">
                       <p className="text-[10px] text-muted-foreground">
                         {t.gpa.current}
@@ -559,6 +594,28 @@ export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }
                           : stats.neededOnRemaining === null
                             ? "—"
                             : percent(Math.max(0, stats.neededOnRemaining))}
+                      </p>
+                    </div>
+                    <div className="px-2 py-2.5">
+                      <p className="text-[10px] text-muted-foreground">
+                        {t.gpa.finalExam}
+                      </p>
+                      <p
+                        className={cn(
+                          "text-sm font-semibold tabular-nums",
+                          stats.finalRequiredPercent !== null &&
+                            stats.finalRequiredPercent > 100 &&
+                            "text-destructive",
+                          stats.finalRequiredPercent !== null &&
+                            stats.finalRequiredPercent <= 0 &&
+                            "text-success",
+                        )}
+                      >
+                        {stats.finalGraded
+                          ? t.gpa.finalGradedShort
+                          : stats.finalRequiredPercent === null
+                            ? "—"
+                            : percent(stats.finalRequiredPercent)}
                       </p>
                     </div>
                   </div>
@@ -616,6 +673,38 @@ export function GpaWorkspace({ initialCourses }: { initialCourses: CourseDTO[] }
                         {t.gpa.setTarget}
                       </p>
                     )}
+
+                    {stats.targetPercent !== null ? (
+                      stats.hasFinal ? (
+                        <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-2">
+                          {stats.finalRequiredPercent !== null &&
+                          stats.finalRequiredPercent > 100 ? (
+                            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+                          ) : stats.finalRequiredPercent !== null &&
+                            stats.finalRequiredPercent <= 0 ? (
+                            <Check className="mt-0.5 size-3.5 shrink-0 text-success" />
+                          ) : (
+                            <Target className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                          )}
+                          <p className="text-[11px] leading-relaxed text-muted-foreground">
+                            {stats.finalGraded
+                              ? t.gpa.finalGraded
+                              : stats.finalRequiredPercent === null
+                                ? t.gpa.needMoreData
+                                : stats.finalRequiredPercent > 100
+                                  ? t.gpa.finalImpossible
+                                  : stats.finalRequiredPercent <= 0
+                                    ? t.gpa.finalSecured
+                                    : `${t.gpa.finalNeeded}: ${percent(stats.finalRequiredPercent)} · ${t.gpa.finalAssumes} ${percent(stats.finalAssumedPercent)}`}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                          <TrendingUp className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+                          {t.gpa.finalMissing}
+                        </p>
+                      )
+                    ) : null}
 
                     {course.assessments.length === 0 ? (
                       <p className="rounded-lg border border-dashed border-border/70 px-3 py-4 text-center text-[11px] text-muted-foreground">

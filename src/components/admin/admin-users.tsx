@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   CheckCircle2,
   Clock3,
+  Crown,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -55,6 +56,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useI18n } from "@/i18n/provider";
+import { canManageRole, hasRole } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/format";
 import type {
@@ -66,6 +68,7 @@ import type { UserRole, UserStatus } from "@prisma/client";
 
 type StatusFilter = "ALL" | UserStatus;
 type RoleFilter = "ALL" | UserRole;
+type UserPatch = { status?: UserStatus; role?: UserRole };
 
 const emptyForm = {
   name: "",
@@ -101,12 +104,14 @@ export function AdminUsers({
   initialHasMore = false,
   pageSize = 100,
   currentUserId,
+  actorRole,
 }: {
   initialUsers: AdminUserDTO[];
   initialStats: AdminStatsDTO;
   initialHasMore?: boolean;
   pageSize?: number;
   currentUserId: string;
+  actorRole: UserRole;
 }) {
   const { t, locale } = useI18n();
 
@@ -124,6 +129,10 @@ export function AdminUsers({
   const [saving, setSaving] = useState(false);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUserDTO | null>(null);
+  const [confirmChange, setConfirmChange] = useState<{
+    user: AdminUserDTO;
+    patch: UserPatch;
+  } | null>(null);
 
   useEffect(() => setUsers(initialUsers), [initialUsers]);
 
@@ -190,16 +199,27 @@ export function AdminUsers({
   const roleLabel: Record<UserRole, string> = {
     USER: t.admin.roleUser,
     ADMIN: t.admin.roleAdmin,
+    SUPER_ADMIN: t.admin.roleSuperAdmin,
   };
 
   function errorMessage(code?: string) {
     switch (code) {
       case "LAST_ADMIN":
         return t.admin.errorLastAdmin;
+      case "LAST_SUPER_ADMIN":
+        return t.admin.errorLastSuperAdmin;
       case "SELF_ROLE":
       case "SELF_STATUS":
       case "SELF_DELETE":
         return t.admin.errorSelf;
+      case "SUPER_ADMIN_ONLY":
+        return t.admin.errorSuperAdminOnly;
+      case "SUPER_ADMIN_PROMOTION_ONLY":
+        return t.admin.errorPromotionOnly;
+      case "EMAIL_UNVERIFIED":
+        return t.admin.errorEmailUnverified;
+      case "PROTECTED_ACCOUNT":
+        return t.admin.errorProtected;
       case "EMAIL_TAKEN":
         return t.admin.errorEmailTaken;
       case "VALIDATION_ERROR":
@@ -209,9 +229,14 @@ export function AdminUsers({
     }
   }
 
-  function toastForPatch(user: AdminUserDTO, patch: Partial<AdminUserDTO>) {
+  function toastForPatch(user: AdminUserDTO, patch: UserPatch) {
+    if (patch.role === "SUPER_ADMIN") return t.admin.superPromotedToast;
     if (patch.role === "ADMIN") return t.admin.promotedToast;
-    if (patch.role === "USER") return t.admin.demotedToast;
+    if (patch.role === "USER") {
+      return user.role === "SUPER_ADMIN"
+        ? t.admin.superDemotedToast
+        : t.admin.demotedToast;
+    }
     if (patch.status === "SUSPENDED") return t.admin.suspendedToast;
     if (patch.status === "ACTIVE") {
       return user.status === "SUSPENDED"
@@ -221,10 +246,16 @@ export function AdminUsers({
     return t.common.saved;
   }
 
-  async function patchUser(
-    user: AdminUserDTO,
-    patch: { status?: UserStatus; role?: UserRole },
-  ) {
+  function confirmBody() {
+    if (!confirmChange) return "";
+    if (confirmChange.patch.status === "SUSPENDED") return t.admin.confirmSuspend;
+    if (confirmChange.patch.role === "SUPER_ADMIN") return t.admin.confirmSuper;
+    if (confirmChange.patch.role === "ADMIN") return t.admin.confirmPromote;
+    if (confirmChange.patch.role === "USER") return t.admin.confirmDemote;
+    return t.admin.confirmChange;
+  }
+
+  async function patchUser(user: AdminUserDTO, patch: UserPatch) {
     setPendingId(user.id);
     try {
       const response = await fetch(`/api/admin/users/${user.id}`, {
@@ -436,6 +467,9 @@ export function AdminUsers({
                 <SelectItem value="ALL">{t.admin.allRoles}</SelectItem>
                 <SelectItem value="USER">{t.admin.roleUser}</SelectItem>
                 <SelectItem value="ADMIN">{t.admin.roleAdmin}</SelectItem>
+                <SelectItem value="SUPER_ADMIN">
+                  {t.admin.roleSuperAdmin}
+                </SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -458,7 +492,20 @@ export function AdminUsers({
             <AnimatePresence initial={false}>
               {filtered.map((user) => {
                 const isSelf = user.id === currentUserId;
-                const isAdmin = user.role === "ADMIN";
+                const isSuper = user.role === "SUPER_ADMIN";
+                const isAdmin = hasRole(user.role, "ADMIN");
+                const canManage = !isSelf && canManageRole(actorRole, user.role);
+                const canGrantAdmin =
+                  canManage &&
+                  user.status === "ACTIVE" &&
+                  user.role === "USER" &&
+                  hasRole(actorRole, "SUPER_ADMIN");
+                const canGrantSuper =
+                  canManage &&
+                  user.status === "ACTIVE" &&
+                  user.role === "ADMIN" &&
+                  Boolean(user.emailVerified) &&
+                  hasRole(actorRole, "SUPER_ADMIN");
 
                 return (
                   <motion.li
@@ -488,7 +535,9 @@ export function AdminUsers({
                             <Badge variant="secondary">{t.admin.you}</Badge>
                           ) : null}
                           <Badge variant={isAdmin ? "default" : "outline"}>
-                            {isAdmin ? (
+                            {isSuper ? (
+                              <Crown data-icon="inline-start" />
+                            ) : isAdmin ? (
                               <ShieldCheck data-icon="inline-start" />
                             ) : (
                               <UserRound data-icon="inline-start" />
@@ -531,24 +580,17 @@ export function AdminUsers({
                               year: "numeric",
                             })}
                           </span>
-                          <span>
-                            {user.counts.tasks} {t.admin.countsTasks}
-                          </span>
-                          <span>
-                            {user.counts.courses} {t.admin.countsCourses}
-                          </span>
-                          <span>
-                            {user.counts.snippets} {t.admin.countsSnippets}
-                          </span>
-                          <span>
-                            {user.counts.notes} {t.admin.countsNotes}
-                          </span>
+                          {!user.emailVerified ? (
+                            <span className="text-warning">
+                              {t.admin.emailUnverified}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex shrink-0 items-center gap-2 sm:ps-3">
-                      {user.status === "PENDING" ? (
+                      {user.status === "PENDING" && canManage ? (
                         <Button
                           size="sm"
                           onClick={() => patchUser(user, { status: "ACTIVE" })}
@@ -580,8 +622,8 @@ export function AdminUsers({
                             )}
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48">
-                          {user.status === "SUSPENDED" ? (
+                        <DropdownMenuContent align="end" className="w-52">
+                          {user.status === "SUSPENDED" && canManage ? (
                             <DropdownMenuItem
                               className="cursor-pointer"
                               onClick={() => patchUser(user, { status: "ACTIVE" })}
@@ -591,11 +633,14 @@ export function AdminUsers({
                             </DropdownMenuItem>
                           ) : null}
 
-                          {user.status === "ACTIVE" && !isSelf ? (
+                          {user.status === "ACTIVE" && canManage ? (
                             <DropdownMenuItem
                               className="cursor-pointer"
                               onClick={() =>
-                                patchUser(user, { status: "SUSPENDED" })
+                                setConfirmChange({
+                                  user,
+                                  patch: { status: "SUSPENDED" },
+                                })
                               }
                             >
                               <ShieldOff className="size-4" />
@@ -603,20 +648,45 @@ export function AdminUsers({
                             </DropdownMenuItem>
                           ) : null}
 
-                          {!isAdmin ? (
+                          {canGrantAdmin ? (
                             <DropdownMenuItem
                               className="cursor-pointer"
-                              onClick={() => patchUser(user, { role: "ADMIN" })}
+                              onClick={() =>
+                                setConfirmChange({
+                                  user,
+                                  patch: { role: "ADMIN" },
+                                })
+                              }
                             >
                               <ShieldCheck className="size-4" />
                               {t.admin.makeAdmin}
                             </DropdownMenuItem>
                           ) : null}
 
-                          {isAdmin && !isSelf ? (
+                          {canGrantSuper ? (
                             <DropdownMenuItem
                               className="cursor-pointer"
-                              onClick={() => patchUser(user, { role: "USER" })}
+                              onClick={() =>
+                                setConfirmChange({
+                                  user,
+                                  patch: { role: "SUPER_ADMIN" },
+                                })
+                              }
+                            >
+                              <Crown className="size-4" />
+                              {t.admin.makeSuperAdmin}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {canManage && user.role === "ADMIN" ? (
+                            <DropdownMenuItem
+                              className="cursor-pointer"
+                              onClick={() =>
+                                setConfirmChange({
+                                  user,
+                                  patch: { role: "USER" },
+                                })
+                              }
                             >
                               <UserRound className="size-4" />
                               {t.admin.removeAdmin}
@@ -630,7 +700,14 @@ export function AdminUsers({
                             </DropdownMenuItem>
                           ) : null}
 
-                          {!isSelf ? (
+                          {!isSelf && !canManage ? (
+                            <DropdownMenuItem disabled>
+                              <ShieldCheck className="size-4" />
+                              {t.admin.protectedAccount}
+                            </DropdownMenuItem>
+                          ) : null}
+
+                          {canManage ? (
                             <>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
@@ -743,7 +820,9 @@ export function AdminUsers({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="USER">{t.admin.roleUser}</SelectItem>
-                    <SelectItem value="ADMIN">{t.admin.roleAdmin}</SelectItem>
+                    {hasRole(actorRole, "SUPER_ADMIN") ? (
+                      <SelectItem value="ADMIN">{t.admin.roleAdmin}</SelectItem>
+                    ) : null}
                   </SelectContent>
                 </Select>
               </div>
@@ -827,6 +906,35 @@ export function AdminUsers({
               className="bg-destructive/10 text-destructive hover:bg-destructive/20"
             >
               {t.common.delete}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={Boolean(confirmChange)}
+        onOpenChange={(open) => {
+          if (!open) setConfirmChange(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t.admin.confirmTitle}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmChange
+                ? `${confirmChange.user.name ?? confirmChange.user.email} — ${confirmBody()}`
+                : t.admin.confirmChange}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const change = confirmChange;
+                setConfirmChange(null);
+                if (change) void patchUser(change.user, change.patch);
+              }}
+            >
+              {t.common.confirm}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

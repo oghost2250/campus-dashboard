@@ -19,5 +19,10 @@ export default async function GpaPage() {
     orderBy: { createdAt: "asc" },
   });
 
-  return <GpaWorkspace initialCourses={courses.map(courseDTO)} />;
+  return (
+    <GpaWorkspace
+      initialCourses={courses.map(courseDTO)}
+      gpaScale={user.gpaScale === 5 ? 5 : 4}
+    />
+  );
 }

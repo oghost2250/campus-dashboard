@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { UserRole } from "@prisma/client";
 import { LogOut, Settings, ShieldCheck, UserRound } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -14,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n/provider";
+import { hasRole } from "@/lib/roles";
 import { signOutAction } from "@/app/actions/auth";
 
 function initials(name: string | null, email: string) {
@@ -29,7 +31,7 @@ export function UserMenu({
     name: string | null;
     email: string;
     image: string | null;
-    role: "USER" | "ADMIN";
+    role: UserRole;
   };
 }) {
   const { t } = useI18n();
@@ -74,7 +76,7 @@ export function UserMenu({
             {t.common.settings}
           </Link>
         </DropdownMenuItem>
-        {user.role === "ADMIN" ? (
+        {hasRole(user.role, "ADMIN") ? (
           <DropdownMenuItem asChild>
             <Link href="/dashboard/admin" className="cursor-pointer">
               <ShieldCheck className="size-4" />

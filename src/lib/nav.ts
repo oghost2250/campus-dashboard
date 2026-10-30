@@ -1,3 +1,6 @@
+import type { UserRole } from "@prisma/client";
+
+import { hasRole } from "@/lib/roles";
 import {
   BookOpenCheck,
   CalendarDays,
@@ -39,11 +42,11 @@ export type NavGroup = {
   id:
     | "overview"
     | "academic"
+    | "study"
     | "developer"
-    | "productivity"
     | "administration";
   items: NavItem[];
-  /** Only rendered for accounts with the ADMIN role. */
+  /** Only rendered for ADMIN and SUPER_ADMIN accounts. */
   adminOnly?: boolean;
 };
 
@@ -59,7 +62,14 @@ export const navGroups: NavGroup[] = [
       { href: "/dashboard/gpa", id: "gpa", icon: Calculator },
       { href: "/dashboard/syllabus", id: "syllabus", icon: BookOpenCheck },
       { href: "/dashboard/schedule", id: "schedule", icon: CalendarDays },
+    ],
+  },
+  {
+    id: "study",
+    items: [
       { href: "/dashboard/study-hub", id: "studyHub", icon: Library },
+      { href: "/dashboard/pomodoro", id: "pomodoro", icon: Timer },
+      { href: "/dashboard/notes", id: "notes", icon: NotebookPen },
     ],
   },
   {
@@ -71,13 +81,6 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
-    id: "productivity",
-    items: [
-      { href: "/dashboard/pomodoro", id: "pomodoro", icon: Timer },
-      { href: "/dashboard/notes", id: "notes", icon: NotebookPen },
-    ],
-  },
-  {
     id: "administration",
     adminOnly: true,
     items: [{ href: "/dashboard/admin", id: "admin", icon: ShieldCheck }],
@@ -85,8 +88,13 @@ export const navGroups: NavGroup[] = [
 ];
 
 /** Filter the sidebar down to what this account may open. */
-export function navGroupsForRole(role: "USER" | "ADMIN"): NavGroup[] {
-  return role === "ADMIN"
-    ? navGroups
-    : navGroups.filter((group) => !group.adminOnly);
+export function navGroupsForUser(
+  role: UserRole,
+  isDeveloper: boolean,
+): NavGroup[] {
+  return navGroups.filter((group) => {
+    if (group.adminOnly && !hasRole(role, "ADMIN")) return false;
+    if (group.id === "developer" && !isDeveloper) return false;
+    return true;
+  });
 }
