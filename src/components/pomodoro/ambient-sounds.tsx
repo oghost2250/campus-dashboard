@@ -33,7 +33,7 @@ function fillNoise(context: AudioContext, kind: Sound): AudioBuffer {
       data[index] = last * 3.5;
     }
   } else if (kind === "rain") {
-    // Pink-ish noise: less harsh than white, closer to distant rainfall.
+    // Pink-ish noise base: less harsh than white, closer to distant rainfall.
     let b0 = 0;
     let b1 = 0;
     let b2 = 0;
@@ -50,7 +50,18 @@ function fillNoise(context: AudioContext, kind: Sound): AudioBuffer {
       b4 = 0.94 * b4 + white * 0.5596878;
       b5 = 0.9 * b5 + white * 0.5290486;
       b6 = 0.84 * b6 + white * 0.5053703;
-      data[index] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+      data[index] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.07;
+    }
+
+    // Layer in distinct droplet impulses so it reads as rain, not static.
+    const droplets = Math.floor(length / context.sampleRate) * 18;
+    for (let d = 0; d < droplets; d += 1) {
+      const pos = Math.floor(Math.random() * (length - 200));
+      const amp = 0.25 + Math.random() * 0.5;
+      const decay = 8 + Math.floor(Math.random() * 12);
+      for (let k = 0; k < decay; k += 1) {
+        data[pos + k] += (Math.random() * 2 - 1) * amp * (1 - k / decay);
+      }
     }
   } else {
     for (let index = 0; index < length; index += 1) {
