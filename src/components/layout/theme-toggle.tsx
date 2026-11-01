@@ -21,7 +21,7 @@ export function ThemeToggle() {
 
   useEffect(() => setMounted(true), []);
 
-  const current = (theme ?? "system") as (typeof order)[number];
+  const current = (mounted ? (theme ?? "system") : "system") as (typeof order)[number];
   const Icon = current === "light" ? Sun : current === "dark" ? Moon : Monitor;
 
   const label =
