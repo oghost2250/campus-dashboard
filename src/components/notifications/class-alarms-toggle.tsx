@@ -69,6 +69,14 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
     let active = true;
     void (async () => {
       try {
+        // Clean up the old caching service worker if it's still registered.
+        const stale = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(
+          stale
+            .filter((entry) => entry.active?.scriptURL.endsWith("/sw.js"))
+            .map((entry) => entry.unregister()),
+        );
+
         const registration = await navigator.serviceWorker.getRegistration("/");
         const subscription = await registration?.pushManager.getSubscription();
         if (!subscription || !active) return;
@@ -107,10 +115,40 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
         return;
       }
 
+      // Drop any stale caching service worker left over from the previous build.
+      const stale = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(
+        stale
+          .filter((entry) => entry.active?.scriptURL.endsWith("/sw.js"))
+          .map((entry) => entry.unregister()),
+      );
+
       const registration = await navigator.serviceWorker.register(
         SERVICE_WORKER_URL,
         { scope: "/" },
       );
+
+      // Wait for the new worker to become active, not just installed.
+      if (!registration.active) {
+        const worker = registration.installing || registration.waiting;
+        if (worker) {
+          await new Promise<void>((resolve, reject) => {
+            const timeout = window.setTimeout(
+              () => reject(new Error("Service worker did not activate in time.")),
+              10000,
+            );
+            worker.addEventListener("statechange", () => {
+              if (worker.state === "activated") {
+                window.clearTimeout(timeout);
+                resolve();
+              } else if (worker.state === "redundant") {
+                window.clearTimeout(timeout);
+                reject(new Error("Service worker became redundant."));
+              }
+            });
+          });
+        }
+      }
       await navigator.serviceWorker.ready;
 
       const existing = await registration.pushManager.getSubscription();
@@ -125,6 +163,7 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
       setSubscribed(true);
       toast.success("Class alarms enabled on this device.");
     } catch (error) {
+      console.error("[class-alarms] enable failed:", error);
       toast.error(
         error instanceof Error
           ? error.message
