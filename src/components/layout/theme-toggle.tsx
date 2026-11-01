@@ -41,7 +41,13 @@ export function ThemeToggle() {
           aria-label={`${t.common.theme}: ${label}`}
           onClick={() => {
             const index = order.indexOf(current);
-            setTheme(order[(index + 1) % order.length]);
+            const next = order[(index + 1) % order.length];
+            setTheme(next);
+            void fetch("/api/profile", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ theme: next }),
+            }).catch(() => {});
           }}
         >
           {mounted ? (

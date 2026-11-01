@@ -1,5 +1,3 @@
-import { loadPersisted, savePersisted } from "@/lib/browser-store";
-
 export type ScheduleAccent = "indigo" | "emerald" | "blue" | "amber";
 
 export type ScheduleCourse = {
@@ -10,12 +8,14 @@ export type ScheduleCourse = {
   startTime: string;
   endTime: string;
   accent: ScheduleAccent;
-  room?: string;
-  instructor?: string;
-  term?: string;
+  room?: string | null;
+  instructor?: string | null;
+  term?: string | null;
 };
 
+/** Legacy browser key, read once to migrate a local schedule into the account. */
 export const SCHEDULE_STORAGE_KEY = "schedule-courses-v1";
+export const SCHEDULE_MIGRATED_KEY = "schedule-migrated-v1";
 
 export const SCHEDULE_DAYS = [
   "Sunday",
@@ -27,11 +27,9 @@ export const SCHEDULE_DAYS = [
   "Saturday",
 ] as const;
 
-export async function loadSchedule(): Promise<ScheduleCourse[]> {
-  const stored = await loadPersisted<ScheduleCourse[]>(SCHEDULE_STORAGE_KEY);
-  return Array.isArray(stored) ? stored : [];
-}
-
-export async function saveSchedule(courses: ScheduleCourse[]): Promise<void> {
-  await savePersisted(SCHEDULE_STORAGE_KEY, courses);
-}
+export const SCHEDULE_ACCENTS: ScheduleAccent[] = [
+  "indigo",
+  "emerald",
+  "blue",
+  "amber",
+];

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/session";
 import { startOfToday } from "@/lib/format";
 import { pageMetadata } from "@/lib/metadata";
+import { parsePomodoroSettings } from "@/lib/preferences";
 import { pomodoroDTO } from "@/lib/serialize";
 import { PomodoroTimer } from "@/components/pomodoro/pomodoro-timer";
 import type { FocusAnalyticsDTO, FocusDayDTO } from "@/lib/types";
@@ -97,6 +98,7 @@ export default async function PomodoroPage() {
       todaySessions={today._count}
       recent={recent.map(pomodoroDTO)}
       analytics={buildAnalytics(history)}
+      initialSettings={parsePomodoroSettings(user.pomodoroSettings)}
     />
   );
 }

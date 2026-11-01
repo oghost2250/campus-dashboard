@@ -5,6 +5,8 @@ import { requireUser } from "@/lib/session";
 import { endOfWeek, startOfToday } from "@/lib/format";
 import { pageMetadata } from "@/lib/metadata";
 import { computeCourseStats, computeGpa } from "@/lib/gpa";
+import { parseClockPreference } from "@/lib/preferences";
+import type { ScheduleAccent } from "@/lib/schedule";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 
 export function generateMetadata(): Promise<Metadata> {
@@ -16,7 +18,7 @@ export default async function DashboardPage() {
   const today = startOfToday();
   const weekEnd = endOfWeek();
 
-  const [tasks, courses, focus] = await Promise.all([
+  const [tasks, courses, focus, schedule] = await Promise.all([
     prisma.task.findMany({
       where: { userId: user.id },
       orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
@@ -48,6 +50,10 @@ export default async function DashboardPage() {
       },
       _sum: { durationMinutes: true },
       _count: true,
+    }),
+    prisma.scheduleCourse.findMany({
+      where: { userId: user.id },
+      orderBy: [{ startTime: "asc" }],
     }),
   ]);
 
@@ -124,6 +130,19 @@ export default async function DashboardPage() {
           : null
       }
       thisWeek={thisWeek}
+      schedule={schedule.map((course) => ({
+        id: course.id,
+        title: course.title,
+        code: course.code,
+        day: course.day,
+        startTime: course.startTime,
+        endTime: course.endTime,
+        accent: course.accent as ScheduleAccent,
+        room: course.room,
+        instructor: course.instructor,
+        term: course.term,
+      }))}
+      timeFormat={parseClockPreference(user.timeFormat)}
       onboarding={{
         courses: courses.length > 0,
         assignment: tasks.length > 0,

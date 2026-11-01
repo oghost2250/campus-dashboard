@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -22,11 +21,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/provider";
 import { daysUntil, formatDate } from "@/lib/format";
-import {
-  loadSchedule,
-  SCHEDULE_DAYS,
-  type ScheduleCourse,
-} from "@/lib/schedule";
+import { SCHEDULE_DAYS, type ScheduleCourse } from "@/lib/schedule";
+import { formatClock, type ClockFormat } from "@/lib/time";
 import type { StatsDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +42,8 @@ type Props = {
   stats: StatsDTO;
   nextDeadline: DeadlineItem | null;
   thisWeek: DeadlineItem[];
+  schedule: ScheduleCourse[];
+  timeFormat: ClockFormat;
   onboarding: {
     courses: boolean;
     assignment: boolean;
@@ -67,15 +65,6 @@ function toMinutes(time: string): number {
   return hour * 60 + (minute || 0);
 }
 
-function clock(value: string, locale: "en" | "ar"): string {
-  const [hour, minute] = value.split(":").map(Number);
-  const date = new Date(2000, 0, 1, hour || 0, minute || 0);
-  return new Intl.DateTimeFormat(locale, {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
 export function DashboardView({
   name,
   greeting,
@@ -83,21 +72,12 @@ export function DashboardView({
   stats,
   nextDeadline,
   thisWeek,
+  schedule,
+  timeFormat,
   onboarding,
 }: Props) {
   const { t, locale } = useI18n();
   const firstName = (name ?? "").split(" ")[0];
-  const [schedule, setSchedule] = useState<ScheduleCourse[] | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    void loadSchedule().then((saved) => {
-      if (active) setSchedule(saved);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
 
   const greetingText =
     greeting === "morning"
@@ -108,7 +88,7 @@ export function DashboardView({
 
   const todayName = SCHEDULE_DAYS[new Date().getDay()];
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
-  const todayClasses = (schedule ?? [])
+  const todayClasses = schedule
     .filter((course) => course.day === todayName)
     .sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
   const nextClassId =
@@ -126,7 +106,7 @@ export function DashboardView({
       key: "schedule",
       label: t.dashboard.stepAddSchedule,
       href: "/dashboard/schedule",
-      done: schedule !== null && schedule.length > 0,
+      done: schedule.length > 0,
     },
     {
       key: "assignment",
@@ -142,7 +122,7 @@ export function DashboardView({
     },
   ];
   const setupDone = setupSteps.filter((step) => step.done).length;
-  const showSetup = schedule !== null && setupDone < setupSteps.length;
+  const showSetup = setupDone < setupSteps.length;
 
   const tiles = [
     {
@@ -407,12 +387,7 @@ export function DashboardView({
             </Link>
           </div>
 
-          {schedule === null ? (
-            <div className="space-y-2 p-5">
-              <div className="h-12 animate-pulse rounded-xl bg-muted/60" />
-              <div className="h-12 animate-pulse rounded-xl bg-muted/40" />
-            </div>
-          ) : todayClasses.length === 0 ? (
+          {todayClasses.length === 0 ? (
             <div className="m-5 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border/80 p-6 text-center">
               <p className="text-sm text-muted-foreground">
                 {t.dashboard.noClassesToday}
@@ -438,9 +413,9 @@ export function DashboardView({
                   >
                     <div className="w-24 shrink-0 text-xs tabular-nums text-muted-foreground">
                       <p className="font-medium text-foreground">
-                        {clock(course.startTime, locale)}
+                        {formatClock(course.startTime, timeFormat, locale)}
                       </p>
-                      <p>{clock(course.endTime, locale)}</p>
+                      <p>{formatClock(course.endTime, timeFormat, locale)}</p>
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">

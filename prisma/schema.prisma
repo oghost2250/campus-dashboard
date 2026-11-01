@@ -44,6 +44,9 @@ model User {
   image         String?
   passwordHash  String? // null for OAuth-only accounts
   locale        String     @default("en") // "en" | "ar"
+  theme         String? // "light" | "dark" | "system"; null = system
+  timeFormat    String     @default("12h") // "12h" | "24h"
+  pomodoroSettings Json? // { focus, short, long, sound, autoStart }
   gpaScale      Int? // null until the student picks 4 or 5
   isDeveloper   Boolean    @default(false)
   role          UserRole   @default(USER)
@@ -68,6 +71,8 @@ model User {
   auditEntries   AuditLog[] @relation("AuditActor")
   auditTargets   AuditLog[] @relation("AuditTarget")
   studyMaterials StudyMaterial[]
+  scheduleCourses ScheduleCourse[]
+  pushSubscriptions PushSubscription[]
 
   // Admin directory is ordered by status then recency; this keeps that scan cheap.
   @@index([status, createdAt])
@@ -198,6 +203,49 @@ model Course {
 
   @@index([userId])
   @@map("courses")
+}
+
+/// One weekly class slot. Times are stored as `"HH:MM"` in 24-hour form so they
+/// sort correctly; the UI renders them in the account's 12/24-hour preference.
+/// This lives in Postgres (not the browser) so a schedule follows the account
+/// across devices, browsers, and cleared site data.
+model ScheduleCourse {
+  id         String   @id @default(cuid())
+  title      String
+  code       String   @default("")
+  day        String // "Sunday" … "Saturday"
+  startTime  String // "HH:MM"
+  endTime    String // "HH:MM"
+  accent     String   @default("indigo")
+  room       String?
+  instructor String?
+  term       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, day, startTime])
+  @@map("schedule_courses")
+}
+
+/// One browser/device that agreed to receive class alarms. A user may have
+/// several (phone, laptop); the endpoint is globally unique per push service.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 model Assessment {

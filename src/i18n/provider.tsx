@@ -32,13 +32,19 @@ type I18nContextValue = {
 const I18nContext = createContext<I18nContextValue | null>(null);
 
 function persistLocale(locale: Locale) {
-  // 1 year, lax — readable by the server on the next request.
+  // 1 year, lax - readable by the server on the next request.
   document.cookie = `${LOCALE_COOKIE}=${locale};path=/;max-age=31536000;samesite=lax`;
   try {
     window.localStorage.setItem(LOCALE_COOKIE, locale);
   } catch {
     /* storage can be unavailable in private mode */
   }
+  // Keep the account in sync so the choice follows the user to other devices.
+  void fetch("/api/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ locale }),
+  }).catch(() => {});
 }
 
 export function I18nProvider({

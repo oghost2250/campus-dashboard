@@ -31,6 +31,14 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => value?.trim().replace(/^@/, "").toLowerCase() || null),
+  /** Web Push (VAPID). Both keys are required to send lecture alarms. */
+  NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().min(1).default("mailto:no-reply@example.com"),
+  /** Shared secret Vercel Cron sends as "Authorization: Bearer <secret>". */
+  CRON_SECRET: z.string().optional(),
+  /** IANA zone used to read schedule days/times (stored as local wall time). */
+  APP_TIME_ZONE: z.string().min(1).default("Africa/Cairo"),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -46,4 +54,9 @@ export const env = parsed.data;
 
 export const isGoogleEnabled = Boolean(
   env.AUTH_GOOGLE_ID && env.AUTH_GOOGLE_SECRET,
+);
+
+/** True when both VAPID keys are present, i.e. alarms can actually be sent. */
+export const isPushConfigured = Boolean(
+  env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY,
 );

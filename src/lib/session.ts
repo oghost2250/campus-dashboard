@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import type { UserRole, UserStatus } from "@prisma/client";
+import type { Prisma, UserRole, UserStatus } from "@prisma/client";
 
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -12,7 +12,11 @@ import { LOCALE_COOKIE, defaultLocale, isLocale, type Locale } from "@/i18n/conf
 export async function getLocale(): Promise<Locale> {
   const store = await cookies();
   const value = store.get(LOCALE_COOKIE)?.value;
-  return isLocale(value) ? value : defaultLocale;
+  if (isLocale(value)) return value;
+
+  // No cookie on this device yet: fall back to what the account last used.
+  const user = await getCurrentUser();
+  return user && isLocale(user.locale) ? user.locale : defaultLocale;
 }
 
 export type SessionUser = {
@@ -20,6 +24,10 @@ export type SessionUser = {
   name: string | null;
   email: string;
   image: string | null;
+  locale: string;
+  theme: string | null;
+  timeFormat: string;
+  pomodoroSettings: Prisma.JsonValue | null;
   gpaScale: number | null;
   isDeveloper: boolean;
   role: UserRole;
@@ -46,6 +54,10 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
       name: true,
       email: true,
       image: true,
+      locale: true,
+      theme: true,
+      timeFormat: true,
+      pomodoroSettings: true,
       gpaScale: true,
       isDeveloper: true,
       role: true,

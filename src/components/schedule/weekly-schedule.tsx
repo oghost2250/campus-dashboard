@@ -1,28 +1,39 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
+import { loadPersisted, savePersisted } from "@/lib/browser-store";
+import { ClassAlarmsToggle } from "@/components/notifications/class-alarms-toggle";
+import { useI18n } from "@/i18n/provider";
 import {
-  loadSchedule,
-  saveSchedule,
   SCHEDULE_DAYS as DAYS,
+  SCHEDULE_MIGRATED_KEY,
+  SCHEDULE_STORAGE_KEY,
   type ScheduleAccent as Accent,
   type ScheduleCourse as Course,
 } from "@/lib/schedule";
+import {
+  formatClock,
+  formatClockRange,
+  parseTimeInput,
+  toMinutes,
+  type ClockFormat,
+} from "@/lib/time";
 
 const START_HOUR = 7;
-const END_HOUR = 18; // 6 PM (12 hourly rows, 7 PM end)
+const END_HOUR = 23;
+const START_MINUTES = START_HOUR * 60;
+const END_MINUTES = (END_HOUR + 1) * 60;
+/** Half-hour rows so imported :30 classes land on the right line. */
+const SLOT_MINUTES = 30;
 const HOURS = Array.from(
   { length: END_HOUR - START_HOUR + 1 },
   (_, index) => START_HOUR + index,
 );
-
-const TIME_OPTIONS = Array.from(
-  { length: END_HOUR - START_HOUR + 1 },
-  (_, index) => {
-    const hour = START_HOUR + index;
-    return `${String(hour).padStart(2, "0")}:00`;
-  },
+const SLOTS = Array.from(
+  { length: (END_MINUTES - START_MINUTES) / SLOT_MINUTES },
+  (_, index) => START_MINUTES + index * SLOT_MINUTES,
 );
 
 const ACCENT_OPTIONS: { value: Accent; label: string; className: string }[] = [
@@ -50,28 +61,50 @@ const emptyForm = {
   instructor: "",
 };
 
-function toMinutes(time: string): number {
-  const [hour, minute] = time.split(":").map(Number);
-  return hour * 60 + (minute || 0);
+function coursePayload(course: Course) {
+  return {
+    title: course.title,
+    code: course.code,
+    day: course.day,
+    startTime: course.startTime,
+    endTime: course.endTime,
+    accent: course.accent,
+    room: course.room ?? null,
+    instructor: course.instructor ?? null,
+    term: course.term ?? null,
+  };
 }
 
-function formatHour(hour: number): string {
-  const period = hour >= 12 ? "PM" : "AM";
-  const display = hour > 12 ? hour - 12 : hour === 0 ? 12 : hour;
-  return `${display}:00 ${period}`;
+async function apiRequest<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+    } | null;
+    throw new Error(payload?.error ?? "Could not save your changes.");
+  }
+  return (await response.json()) as T;
 }
 
 export function WeeklySchedule({
   initialCourses = [],
+  timeFormat = "12h",
+  pushPublicKey = null,
 }: {
   initialCourses?: Course[];
+  timeFormat?: ClockFormat;
+  pushPublicKey?: string | null;
 }) {
+  const { locale } = useI18n();
   const [courses, setCourses] = useState<Course[]>(initialCourses);
-  const [hydrated, setHydrated] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -83,21 +116,64 @@ export function WeeklySchedule({
   const [confirmReplaceOpen, setConfirmReplaceOpen] = useState(false);
   const [pendingImport, setPendingImport] = useState<Course[] | null>(null);
 
+  // One-time move of any schedule that is still only in this browser.
   useEffect(() => {
     let active = true;
-    void loadSchedule().then((saved) => {
-      if (!active) return;
-      setCourses(saved);
-      setHydrated(true);
-    });
+
+    async function migrate() {
+      if (initialCourses.length === 0) {
+        const migrated = await loadPersisted<boolean>(SCHEDULE_MIGRATED_KEY);
+        if (!migrated) {
+          const legacy = await loadPersisted<Course[]>(SCHEDULE_STORAGE_KEY);
+          if (Array.isArray(legacy) && legacy.length > 0) {
+            try {
+              const saved = await apiRequest<{ courses: Course[] }>(
+                "/api/schedule",
+                {
+                  method: "PUT",
+                  body: JSON.stringify(legacy.map(coursePayload)),
+                },
+              );
+              if (active) {
+                setCourses(saved.courses);
+                toast.success(
+                  `Restored ${legacy.length} classes from this browser`,
+                );
+              }
+            } catch {
+              return; // retry on the next visit
+            }
+          }
+        }
+      }
+      await savePersisted(SCHEDULE_STORAGE_KEY, []);
+      await savePersisted(SCHEDULE_MIGRATED_KEY, true);
+    }
+
+    void migrate();
     return () => {
       active = false;
     };
-  }, []);
+  }, [initialCourses.length]);
 
+  // Old builds registered a service worker that cached the page; clear it so
+  // the account-synced schedule is always freshly rendered.
   useEffect(() => {
-    if (hydrated) void saveSchedule(courses);
-  }, [courses, hydrated]);
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+      return;
+    }
+    void navigator.serviceWorker
+      .getRegistrations()
+      .then((registrations) =>
+        Promise.all(
+          registrations
+            .filter((entry) => entry.active?.scriptURL.endsWith("/sw.js"))
+            .map((entry) => entry.unregister()),
+        ),
+      )
+      .catch(() => {});
+    if (typeof caches !== "undefined") void caches.delete("campus-schedule-v1");
+  }, []);
 
   const dayIndex = useMemo(() => {
     const map = new Map<string, number>();
@@ -115,21 +191,30 @@ export function WeeklySchedule({
         const endMinutes = toMinutes(course.endTime);
         if (endMinutes <= startMinutes) return null;
 
-        const startHour = startMinutes / 60;
-        const endHour = endMinutes / 60;
-
-        const clampedStart = Math.max(startHour, START_HOUR);
-        const clampedEnd = Math.min(endHour, END_HOUR + 1);
+        const clampedStart = Math.max(startMinutes, START_MINUTES);
+        const clampedEnd = Math.min(endMinutes, END_MINUTES);
         if (clampedEnd <= clampedStart) return null;
 
-        const rowStart = Math.round(clampedStart - START_HOUR) + 2;
-        const rowSpan = Math.max(1, Math.round(clampedEnd - clampedStart));
+        const startSlot = Math.min(
+          SLOTS.length - 1,
+          Math.round((clampedStart - START_MINUTES) / SLOT_MINUTES),
+        );
+        const endSlot = Math.min(
+          SLOTS.length,
+          Math.max(
+            startSlot + 1,
+            Math.round((clampedEnd - START_MINUTES) / SLOT_MINUTES),
+          ),
+        );
+
+        const rowStart = startSlot + 2;
+        const rowEnd = endSlot + 2;
 
         return {
           course,
           col: col + 2,
           rowStart,
-          rowEnd: rowStart + rowSpan,
+          rowEnd,
         };
       })
       .filter(Boolean) as {
@@ -139,6 +224,11 @@ export function WeeklySchedule({
       rowEnd: number;
     }[];
   }, [courses, dayIndex]);
+
+  const outside = useMemo(() => {
+    const placedIds = new Set(placed.map((item) => item.course.id));
+    return courses.filter((course) => !placedIds.has(course.id));
+  }, [courses, placed]);
 
   function openCreate() {
     setEditingId(null);
@@ -169,8 +259,9 @@ export function WeeklySchedule({
     setError(null);
   }
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (pending) return;
     if (!form.title.trim()) {
       setError("Course title is required.");
       return;
@@ -180,58 +271,58 @@ export function WeeklySchedule({
       return;
     }
 
-    if (editingId) {
-      setCourses((current) =>
-        current.map((course) =>
-          course.id === editingId
-            ? {
-                ...course,
-                title: form.title.trim(),
-                code: form.code.trim(),
-                day: form.day,
-                startTime: form.startTime,
-                endTime: form.endTime,
-                accent: form.accent,
-                room: form.room.trim(),
-                instructor: form.instructor.trim(),
-              }
-            : course,
-        ),
-      );
-    } else {
-      setCourses((current) => [
-        ...current,
-        {
-          id: `course-${Date.now()}`,
-          title: form.title.trim(),
-          code: form.code.trim(),
-          day: form.day,
-          startTime: form.startTime,
-          endTime: form.endTime,
-          accent: form.accent,
-          room: form.room.trim(),
-          instructor: form.instructor.trim(),
-        },
-      ]);
-    }
-
-    closeModal();
-  }
-
-  function handleDelete() {
-    if (!editingId) return;
-    setCourses((current) => current.filter((course) => course.id !== editingId));
-    closeModal();
-  }
-
-  // Register a tiny service worker so the schedule page + its last saved
-  // data (IndexedDB) stay available offline.
-  useEffect(() => {
-    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      /* offline support is best-effort */
+    const payload = coursePayload({
+      ...form,
+      id: editingId ?? "",
+      title: form.title.trim(),
+      code: form.code.trim(),
+      room: form.room.trim(),
+      instructor: form.instructor.trim(),
     });
-  }, []);
+
+    setPending(true);
+    try {
+      if (editingId) {
+        const saved = await apiRequest<{ course: Course }>(
+          `/api/schedule/${editingId}`,
+          { method: "PATCH", body: JSON.stringify(payload) },
+        );
+        setCourses((current) =>
+          current.map((course) =>
+            course.id === editingId ? saved.course : course,
+          ),
+        );
+      } else {
+        const saved = await apiRequest<{ course: Course }>("/api/schedule", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        setCourses((current) => [...current, saved.course]);
+      }
+      closeModal();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!editingId || pending) return;
+    if (!window.confirm("Delete this class? This cannot be undone.")) return;
+    setPending(true);
+    try {
+      await apiRequest(`/api/schedule/${editingId}`, { method: "DELETE" });
+      setCourses((current) =>
+        current.filter((course) => course.id !== editingId),
+      );
+      closeModal();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete.");
+    } finally {
+      setPending(false);
+    }
+  }
 
   const DAY_NAMES = [
     "Sunday",
@@ -259,15 +350,6 @@ export function WeeklySchedule({
     return full ?? null;
   }
 
-  function normalizeTime(raw: string): string | null {
-    const match = raw.trim().match(/^(\d{1,2}):(\d{2})$/);
-    if (!match) return null;
-    const hour = Number(match[1]);
-    const minute = Number(match[2]);
-    if (hour > 23 || minute > 59) return null;
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-
   function parseScheduleText(text: string) {
     const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const rows: { selected: boolean; course: Course }[] = [];
@@ -287,15 +369,17 @@ export function WeeklySchedule({
         }
       }
 
-      // Find a time range HH:MM-HH:MM (or en-dash).
-      const timeMatch = line.match(/(\d{1,2}:\d{2})\s*[-–]\s*(\d{1,2}:\d{2})/);
+      // Find a time range like "09:00-10:30" or "9 AM - 10:30 AM".
+      const timeMatch = line.match(
+        /(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-–]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)/i,
+      );
       if (!day || !timeMatch) {
         skipped += 1;
         continue;
       }
 
-      const startTime = normalizeTime(timeMatch[1]);
-      const endTime = normalizeTime(timeMatch[2]);
+      const startTime = parseTimeInput(timeMatch[1]);
+      const endTime = parseTimeInput(timeMatch[2]);
       if (!startTime || !endTime) {
         skipped += 1;
         continue;
@@ -307,19 +391,26 @@ export function WeeklySchedule({
         .replace(new RegExp(`\\b${tokens[dayTokenIndex]}\\b`, "i"), " ")
         .trim();
 
-      // Heuristics for code / room / instructor / title.
+      // Heuristics for code / room / instructor / title. Each match is removed
+      // from `working` so it cannot be stolen by the next pattern.
       const codeMatch = rest.match(/\b([A-Z]{2,}\s?\d{2,4}[A-Z]?)\b/);
       const code = codeMatch ? codeMatch[1].replace(/\s+/, " ") : "";
-      const roomMatch = rest.match(/(?:room|rm|r\.?)\s*[:#-]?\s*([A-Za-z0-9-]+)/i);
+      const roomMatch = rest.match(
+        /(?:\broom\b|\brm\b|\br\.)\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9-]*)/i,
+      );
       const room = roomMatch ? roomMatch[1] : "";
-      const instrMatch = rest.match(/(?:dr\.?|prof\.?|instructor)\s+([A-Za-z][A-Za-z .'-]*)/i);
-      const instructor = instrMatch ? instrMatch[1].trim() : "";
 
-      let title = rest;
-      if (code) title = title.replace(code, " ");
-      if (roomMatch) title = title.replace(roomMatch[0], " ");
-      if (instrMatch) title = title.replace(instrMatch[0], " ");
-      title = title.replace(/\s+/g, " ").trim();
+      let working = rest;
+      if (code) working = working.replace(code, " ");
+      if (roomMatch) working = working.replace(roomMatch[0], " ");
+
+      const instrMatch = working.match(
+        /(?:\bdr\.?|\bprof\.?|\binstructor\b)\s+([A-Za-z][A-Za-z.'’-]*(?:\s+[A-Za-z][A-Za-z.'’-]*){0,2})/i,
+      );
+      const instructor = instrMatch ? instrMatch[1].trim() : "";
+      if (instrMatch) working = working.replace(instrMatch[0], " ");
+
+      let title = working.replace(/[\s,;|]+/g, " ").trim();
       if (!title) title = code || "Untitled course";
 
       const accents: Course["accent"][] = ["indigo", "emerald", "blue", "amber"];
@@ -355,62 +446,93 @@ export function WeeklySchedule({
       setConfirmReplaceOpen(true);
       return;
     }
-    setCourses(chosen);
-    setImportOpen(false);
-    setImportText("");
-    setParsedRows([]);
+    void persistImport(chosen);
+  }
+
+  async function persistImport(chosen: Course[]) {
+    if (chosen.length === 0 || pending) return;
+    setPending(true);
+    try {
+      const saved = await apiRequest<{ courses: Course[] }>("/api/schedule", {
+        method: "PUT",
+        body: JSON.stringify(chosen.map(coursePayload)),
+      });
+      setCourses(saved.courses);
+      setImportOpen(false);
+      setImportText("");
+      setParsedRows([]);
+      toast.success(`Saved ${saved.courses.length} classes to your account`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setPending(false);
+      setPendingImport(null);
+      setConfirmReplaceOpen(false);
+    }
   }
 
   function confirmReplace() {
-    if (pendingImport) setCourses(pendingImport);
-    setPendingImport(null);
-    setConfirmReplaceOpen(false);
-    setImportOpen(false);
-    setImportText("");
-    setParsedRows([]);
+    if (!pendingImport) return;
+    void persistImport(pendingImport);
   }
 
-  function clearSchedule() {
-    if (window.confirm("Clear the entire schedule? This cannot be undone.")) {
+  async function clearSchedule() {
+    if (!window.confirm("Clear the entire schedule? This cannot be undone.")) {
+      return;
+    }
+    setPending(true);
+    try {
+      await apiRequest("/api/schedule", { method: "DELETE" });
       setCourses([]);
+      toast.success("Schedule cleared");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not clear.");
+    } finally {
+      setPending(false);
     }
   }
 
   return (
     <div className="w-full">
-      <div className="mb-3 flex items-center justify-between gap-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold tracking-tight text-gray-200">
             Weekly schedule
           </h2>
-          <span className="text-[11px] text-gray-500">7:00 AM – 7:00 PM</span>
+          <span className="text-[11px] text-gray-500">
+            {formatClock("07:00", timeFormat, locale)} –{" "}
+            {formatClock("00:00", timeFormat, locale)}
+          </span>
         </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
-        >
-          <span className="text-base leading-none">+</span>
-          Add course
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            setImportOpen(true);
-            setParsedRows([]);
-            setSkippedCount(0);
-          }}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-zinc-700"
-        >
-          Import
-        </button>
-        <button
-          type="button"
-          onClick={clearSchedule}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400 transition-colors hover:bg-rose-500/20"
-        >
-          Clear
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ClassAlarmsToggle publicKey={pushPublicKey} />
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
+          >
+            <span className="text-base leading-none">+</span>
+            Add course
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setImportOpen(true);
+              setParsedRows([]);
+              setSkippedCount(0);
+            }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-200 transition-colors hover:bg-zinc-700"
+          >
+            Import
+          </button>
+          <button
+            type="button"
+            onClick={clearSchedule}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-medium text-rose-400 transition-colors hover:bg-rose-500/20"
+          >
+            Clear
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-white/10 bg-[#0a0a0a]">
@@ -419,7 +541,7 @@ export function WeeklySchedule({
           style={{
             display: "grid",
             gridTemplateColumns: "80px repeat(7, minmax(120px, 1fr))",
-            gridTemplateRows: `40px repeat(${HOURS.length}, 64px)`,
+            gridTemplateRows: `40px repeat(${SLOTS.length}, 32px)`,
           }}
         >
           {/* Corner cell */}
@@ -440,20 +562,28 @@ export function WeeklySchedule({
           ))}
 
           {/* Each time label is a direct grid item pinned to the first column. */}
-          {HOURS.map((hour, index) => (
+          {HOURS.map((hour) => (
             <div
               key={`time-${hour}`}
-              className="flex items-start justify-end border-b border-r border-white/10 pr-3 pt-2 text-right text-xs tabular-nums text-zinc-400"
-              style={{ gridColumn: 1, gridRow: index + 2 }}
+              className="flex items-start justify-end border-b border-r border-white/10 pr-3 pt-1 text-right text-[10px] tabular-nums text-zinc-400"
+              style={{
+                gridColumn: 1,
+                gridRow: (hour - START_HOUR) * (60 / SLOT_MINUTES) + 2,
+              }}
             >
-              {formatHour(hour)}
+              {formatClock(`${String(hour).padStart(2, "0")}:00`, timeFormat, locale)}
             </div>
           ))}
-          {HOURS.flatMap((hour, index) =>
+          {SLOTS.flatMap((slot, index) =>
             DAYS.map((day, dayIndex) => (
               <div
-                key={`${day}-${hour}`}
-                className="border-b border-r border-white/10 last:border-r-0"
+                key={`${day}-${slot}`}
+                className={[
+                  "border-r border-white/10 last:border-r-0",
+                  index % 2 === 0
+                    ? "border-b border-white/10"
+                    : "border-b border-white/5",
+                ].join(" ")}
                 style={{
                   gridColumn: dayIndex + 2,
                   gridRow: index + 2,
@@ -469,7 +599,7 @@ export function WeeklySchedule({
               type="button"
               onClick={() => openEdit(course)}
               className={[
-                "m-1 flex flex-col justify-center gap-0.5 rounded-lg border border-zinc-800 bg-zinc-900/80 px-2.5 py-1.5 text-left",
+                "m-1 flex flex-col justify-center gap-0.5 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-900/80 px-2 py-1 text-left",
                 "border-l-[3px]",
                 accentBorder[course.accent],
                 "shadow-sm transition-colors hover:bg-zinc-800/80",
@@ -485,12 +615,31 @@ export function WeeklySchedule({
               </span>
               <span className="truncate text-[10px] text-gray-400">
                 {course.code ? `${course.code} · ` : ""}
-                {course.startTime} – {course.endTime}
+                {formatClockRange(course.startTime, course.endTime, timeFormat, locale)}
               </span>
             </button>
           ))}
         </div>
       </div>
+
+      {outside.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <span className="text-[11px] text-amber-300">
+            Outside the visible grid
+          </span>
+          {outside.map((course) => (
+            <button
+              key={course.id}
+              type="button"
+              onClick={() => openEdit(course)}
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-gray-200 transition-colors hover:bg-zinc-700"
+            >
+              {course.day} ·{" "}
+              {formatClockRange(course.startTime, course.endTime, timeFormat, locale)}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mt-3 flex items-center gap-2 text-[11px] text-gray-400">
         <span className="size-2 rounded-full bg-indigo-500" />
@@ -605,7 +754,8 @@ export function WeeklySchedule({
                   <label className="text-[11px] font-medium text-gray-400">
                     Start time
                   </label>
-                  <select
+                  <input
+                    type="time"
                     value={form.startTime}
                     onChange={(event) =>
                       setForm((state) => ({
@@ -613,20 +763,17 @@ export function WeeklySchedule({
                         startTime: event.target.value,
                       }))
                     }
-                    className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
-                  >
-                    {TIME_OPTIONS.map((time) => (
-                      <option key={time} value={time}>
-                        {time}
-                      </option>
-                    ))}
-                  </select>
+                    step={60}
+                    required
+                    className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white [color-scheme:dark] focus:border-indigo-500 focus:outline-none"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-[11px] font-medium text-gray-400">
                     End time
                   </label>
-                  <select
+                  <input
+                    type="time"
                     value={form.endTime}
                     onChange={(event) =>
                       setForm((state) => ({
@@ -634,14 +781,10 @@ export function WeeklySchedule({
                         endTime: event.target.value,
                       }))
                     }
-                    className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white focus:border-indigo-500 focus:outline-none"
-                  >
-                    {TIME_OPTIONS.map((time) => (
-                      <option key={time} value={time}>
-                        {time}
-                      </option>
-                    ))}
-                  </select>
+                    step={60}
+                    required
+                    className="h-10 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 text-sm text-white [color-scheme:dark] focus:border-indigo-500 focus:outline-none"
+                  />
                 </div>
               </div>
 
@@ -699,7 +842,8 @@ export function WeeklySchedule({
                   </button>
                   <button
                     type="submit"
-                    className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-indigo-500"
+                    disabled={pending}
+                    className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {editingId ? "Save changes" : "Add course"}
                   </button>
@@ -791,7 +935,7 @@ export function WeeklySchedule({
                           </td>
                           <td className="px-2 py-1.5">{row.course.day}</td>
                           <td className="px-2 py-1.5">
-                            {row.course.startTime} – {row.course.endTime}
+                            {formatClockRange(row.course.startTime, row.course.endTime, timeFormat, locale)}
                           </td>
                           <td className="px-2 py-1.5">{row.course.room}</td>
                         </tr>

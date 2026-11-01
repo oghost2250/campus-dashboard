@@ -35,33 +35,6 @@ type Settings = {
   autoStart: boolean;
 };
 
-const defaultSettings: Settings = {
-  focus: 25,
-  short: 5,
-  long: 15,
-  sound: true,
-  autoStart: false,
-};
-
-const STORAGE_KEY = "sdd-pomodoro-settings";
-
-function loadSettings(): Settings {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultSettings;
-    const parsed = JSON.parse(raw) as Partial<Settings>;
-    return {
-      focus: clampMinutes(parsed.focus, 25),
-      short: clampMinutes(parsed.short, 5),
-      long: clampMinutes(parsed.long, 15),
-      sound: typeof parsed.sound === "boolean" ? parsed.sound : true,
-      autoStart: parsed.autoStart === true,
-    };
-  } catch {
-    return defaultSettings;
-  }
-}
-
 function clampMinutes(value: unknown, fallback: number) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
@@ -102,17 +75,19 @@ export function PomodoroTimer({
   todaySessions: initialSessions,
   recent: initialRecent,
   analytics: initialAnalytics,
+  initialSettings,
 }: {
   todayMinutes: number;
   todaySessions: number;
   recent: PomodoroDTO[];
   analytics: FocusAnalyticsDTO;
+  initialSettings: Settings;
 }) {
   const { t, locale } = useI18n();
 
-  const [settings, setSettings] = useState<Settings>(defaultSettings);
+  const [settings, setSettings] = useState<Settings>(initialSettings);
   const [mode, setMode] = useState<Mode>("focus");
-  const [remaining, setRemaining] = useState(defaultSettings.focus * 60);
+  const [remaining, setRemaining] = useState(initialSettings.focus * 60);
   const [running, setRunning] = useState(false);
   const [rounds, setRounds] = useState(0);
   const [label, setLabel] = useState("");
@@ -135,18 +110,22 @@ export function PomodoroTimer({
     [settings.focus, settings.short, settings.long],
   );
 
-  useEffect(() => {
-    const stored = loadSettings();
-    setSettings(stored);
-    setRemaining(stored.focus * 60);
-  }, []);
+  const persistedSettings = useRef(JSON.stringify(initialSettings));
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    } catch {
-      // Storage may be unavailable in private mode.
-    }
+    const serialized = JSON.stringify(settings);
+    if (serialized === persistedSettings.current) return;
+
+    const timer = window.setTimeout(() => {
+      persistedSettings.current = serialized;
+      void fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pomodoroSettings: settings }),
+      }).catch(() => {});
+    }, 600);
+
+    return () => window.clearTimeout(timer);
   }, [settings]);
 
   useEffect(() => {

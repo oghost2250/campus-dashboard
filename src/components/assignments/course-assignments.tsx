@@ -8,8 +8,6 @@ import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
 import {
   downscaleImage,
-  loadPersisted,
-  savePersisted,
 } from "@/lib/browser-store";
 
 const MAX_PAGES = 25;
@@ -302,24 +300,21 @@ export function CourseAssignments() {
 
       await response.json();
 
-      // Backup to the Study Hub vault (IndexedDB; PDFs exceed localStorage).
       try {
-        const existing =
-          (await loadPersisted<unknown[]>("campus-study-hub")) ?? [];
-        const backup = {
-          id: `backup-${Date.now()}`,
-          title: `${activeAssignment.title} (Submitted)`,
-          course: activeAssignment.course,
-          category: "Assignment",
-          privacy: "private",
-          fileData: previewPdf,
-          fileType: "application/pdf",
-          owner: "You",
-          createdAt: Date.now(),
-        };
-        await savePersisted("campus-study-hub", [backup, ...existing]);
+        await fetch("/api/study-materials", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: `${activeAssignment.title} (Submitted)`,
+            course: activeAssignment.course,
+            category: "Assignment",
+            privacy: "private",
+            fileData: previewPdf,
+            fileType: "application/pdf",
+          }),
+        });
       } catch {
-        // ignore storage errors
+        // The submission already succeeded; the vault copy is best-effort.
       }
 
       setModalOpen(false);

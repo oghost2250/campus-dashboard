@@ -29,7 +29,7 @@ Assignments · GPA calculator · Snippet manager (shareable) · Pomodoro + analy
 ## Quick start
 
 ```bash
-cd student-dev-dashboard
+cd "campus dashboard"
 npm install
 
 # 1. Environment
@@ -160,9 +160,9 @@ tags, and code. Highlights follow the active theme.
 ### Pomodoro
 Deadline-based countdown (immune to drift and background-tab throttling),
 25/5 default with configurable focus / short / long lengths, automatic long break
-every fourth round, optional auto-start, Web Audio chime, settings persisted in
-`localStorage`, and completed focus sessions logged to the database with today's
-minute + session totals.
+every fourth round, optional auto-start, Web Audio chime, settings saved to the
+account (`User.pomodoroSettings`), and completed focus sessions logged to the
+database with today's minute + session totals.
 
 ### Scratchpad
 Markdown notes with 750 ms debounced autosave (flushed on unmount and note
@@ -196,6 +196,29 @@ last remaining active admin cannot be demoted, suspended, or deleted.
   during the root render so there's no flash of the wrong direction.
 - Settings: rename your profile, switch theme/language, and manage your session.
 - Role-aware navigation: the Administration group only appears for admins.
+
+### Class alarms (Web Push)
+The schedule header has an **Enable class alarms** toggle. It registers
+`public/service-worker.js` (push-only — it never caches pages), asks for
+notification permission, subscribes with the VAPID public key, and stores the
+endpoint in `push_subscriptions` (`PushSubscription`).
+
+A Vercel Cron job (`vercel.json`, `0 * * * *`) calls
+`GET /api/cron/lecture-alarms` every hour. The handler resolves the local day
+and "now + 1 hour" in `APP_TIME_ZONE`, finds every `schedule_courses` row
+starting in that window, and sends an "Upcoming Class!" notification through
+`web-push` to each owner's subscriptions. Endpoints the push service reports as
+gone (404 / 410) are deleted automatically.
+
+Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, and
+`CRON_SECRET` (see `.env.example`). Generate the key pair once with
+`npx web-push generate-vapid-keys --json`; rotating it invalidates existing
+subscriptions, so users toggle alarms on again. Push requires HTTPS outside
+`localhost`.
+
+Vercel's Hobby plan limits cron jobs to once a day — hourly alarms need Pro, or
+any external scheduler that calls the endpoint with
+`Authorization: Bearer $CRON_SECRET`.
 
 ---
 
@@ -361,8 +384,9 @@ The repo was exercised end-to-end against a local PostgreSQL 18 instance:
   exposing the app publicly.
 - No password reset or email-change flow yet (Google OAuth or a direct
   registration are the supported paths).
-- Pomodoro state is per-device (`localStorage` for settings); only completed
-  sessions are synced, intentionally.
+- Pomodoro settings, theme, language, the schedule and the clock format live on
+  the account row (`User`), so they follow the user across devices; completed
+  Pomodoro sessions are stored separately in `PomodoroSession`.
 - Role and status are checked with one extra database read per page/API request.
   That is the price of immediate revocation over JWT-embedded claims; add a short
   cache if you need to shave latency.

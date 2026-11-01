@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/lecture-alarms",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

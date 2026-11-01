@@ -12,6 +12,17 @@ export const profileInputSchema = z
   .object({
     name: z.string().trim().min(2, "Name is too short").max(80).optional(),
     locale: z.enum(["en", "ar"]).optional(),
+    theme: z.enum(["light", "dark", "system"]).nullish(),
+    timeFormat: z.enum(["12h", "24h"]).optional(),
+    pomodoroSettings: z
+      .object({
+        focus: z.coerce.number().int().min(1).max(180),
+        short: z.coerce.number().int().min(1).max(180),
+        long: z.coerce.number().int().min(1).max(180),
+        sound: z.boolean(),
+        autoStart: z.boolean(),
+      })
+      .optional(),
     gpaScale: z.union([z.literal(4), z.literal(5)]).nullable().optional(),
     isDeveloper: z.boolean().optional(),
   })
@@ -19,6 +30,9 @@ export const profileInputSchema = z
     (data) =>
       data.name !== undefined ||
       data.locale !== undefined ||
+      data.theme !== undefined ||
+      data.timeFormat !== undefined ||
+      data.pomodoroSettings !== undefined ||
       data.gpaScale !== undefined ||
       data.isDeveloper !== undefined,
     { message: "Nothing to update" },
