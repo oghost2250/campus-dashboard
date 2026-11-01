@@ -152,8 +152,14 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
       await navigator.serviceWorker.ready;
 
       const existing = await registration.pushManager.getSubscription();
+      if (existing) {
+        // A stale subscription (e.g. from a rotated key) can cause the push
+        // service to reject the new registration; drop it first.
+        await existing.unsubscribe().catch(() => {});
+      }
+
       const subscription =
-        existing ??
+        (await registration.pushManager.getSubscription()) ??
         (await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey),
@@ -164,10 +170,12 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
       toast.success("Class alarms enabled on this device.");
     } catch (error) {
       console.error("[class-alarms] enable failed:", error);
+      const message =
+        error instanceof Error ? error.message : "Could not enable class alarms.";
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not enable class alarms.",
+        message.includes("push service")
+          ? "Push service rejected the registration. Try clearing site data (DevTools → Application → Clear storage) or an incognito window."
+          : message,
       );
     } finally {
       setPending(false);
