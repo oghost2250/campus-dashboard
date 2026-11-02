@@ -42,7 +42,12 @@ type Props = {
   todayName: string;
   /** Minutes since midnight, same source as `todayName`. */
   nowMinutes: number;
-  isoDate: string;
+  /** Header date already formatted on the server, so hydration cannot differ. */
+  headerDate: string;
+  /** IANA zone used for every date on this page. */
+  timeZone: string;
+  /** Server timestamp, so countdowns do not depend on the browser clock. */
+  nowMs: number;
   stats: StatsDTO;
   nextDeadline: DeadlineItem | null;
   thisWeek: DeadlineItem[];
@@ -74,7 +79,9 @@ export function DashboardView({
   greeting,
   todayName,
   nowMinutes,
-  isoDate,
+  headerDate,
+  timeZone,
+  nowMs,
   stats,
   nextDeadline,
   thisWeek,
@@ -174,7 +181,9 @@ export function DashboardView({
     },
   ];
 
-  const countdown = nextDeadline ? daysUntil(nextDeadline.dueDate) : null;
+  const countdown = nextDeadline
+    ? daysUntil(nextDeadline.dueDate, { timeZone, now: new Date(nowMs) })
+    : null;
   const countdownText =
     countdown === null
       ? null
@@ -196,11 +205,7 @@ export function DashboardView({
       >
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">
-            {formatDate(isoDate, locale, {
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-            })}
+            {headerDate}
           </p>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-[1.7rem]">
             {greetingText}
@@ -342,7 +347,7 @@ export function DashboardView({
                   weekday: "short",
                   month: "short",
                   day: "numeric",
-                })}
+                }, timeZone)}
               </p>
             </div>
             <Badge
@@ -558,7 +563,7 @@ export function DashboardView({
                   {formatDate(item.dueDate, locale, {
                     month: "short",
                     day: "numeric",
-                  })}
+                  }, timeZone)}
                 </span>
               </li>
             ))}

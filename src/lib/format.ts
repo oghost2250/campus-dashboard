@@ -6,10 +6,24 @@ export function formatDate(
   value: Date | string,
   locale: Locale,
   options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" },
+  timeZone?: string,
 ): string {
   const date = typeof value === "string" ? new Date(value) : value;
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(localeTag(locale), options).format(date);
+  const resolved = timeZone ? { ...options, timeZone } : options;
+  return new Intl.DateTimeFormat(localeTag(locale), resolved).format(date);
+}
+
+/** Calendar day as `YYYY-MM-DD` in `timeZone` (defaults to the runtime zone). */
+function dayKey(date: Date, timeZone?: string): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return `${read("year")}-${read("month")}-${read("day")}`;
 }
 
 export function formatDateTime(value: Date | string, locale: Locale): string {
@@ -25,13 +39,21 @@ export function formatTime(value: Date | string, locale: Locale): string {
   return formatDate(value, locale, { hour: "2-digit", minute: "2-digit" });
 }
 
-/** Whole calendar days from today (local time). Negative = overdue. */
-export function daysUntil(value: Date | string): number {
+/**
+ * Whole calendar days from "today". Negative = overdue.
+ *
+ * Pass `timeZone` and `now` when the value must match between the server and
+ * the browser; without them each side uses its own clock and zone.
+ */
+export function daysUntil(
+  value: Date | string,
+  options: { timeZone?: string; now?: Date } = {},
+): number {
   const date = typeof value === "string" ? new Date(value) : value;
-  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  const now = options.now ?? new Date();
+  const target = Date.parse(`${dayKey(date, options.timeZone)}T00:00:00Z`);
+  const today = Date.parse(`${dayKey(now, options.timeZone)}T00:00:00Z`);
+  return Math.round((target - today) / 86_400_000);
 }
 
 export function startOfToday(): Date {

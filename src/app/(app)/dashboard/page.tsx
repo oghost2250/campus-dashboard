@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
 import { env } from "@/lib/env";
-import { requireUser } from "@/lib/session";
-import { endOfWeek, startOfToday } from "@/lib/format";
+import { getLocale, requireUser } from "@/lib/session";
+import { endOfWeek, formatDate, startOfToday } from "@/lib/format";
 import { pageMetadata } from "@/lib/metadata";
 import { computeCourseStats, computeGpa } from "@/lib/gpa";
 import { parseClockPreference } from "@/lib/preferences";
@@ -17,14 +17,14 @@ import { DashboardView } from "@/components/dashboard/dashboard-view";
  * identical; deriving them in the browser from `new Date()` mismatches when the
  * server runs in UTC and the student is in Cairo.
  */
-function zonedNow(timeZone: string) {
+function zonedNow(timeZone: string, now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     weekday: "long",
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
-  }).formatToParts(new Date());
+  }).formatToParts(now);
 
   const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
   const rawHour = Number(read("hour"));
@@ -134,8 +134,16 @@ export default async function DashboardPage() {
     .slice(0, 6)
     .map((item) => ({ ...item, dueDate: item.dueDate.toISOString() }));
 
-  const { weekday, minutes, hour } = zonedNow(env.APP_TIME_ZONE);
+  const locale = await getLocale();
+  const now = new Date();
+  const { weekday, minutes, hour } = zonedNow(env.APP_TIME_ZONE, now);
   const greeting = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+  const headerDate = formatDate(
+    now,
+    locale,
+    { weekday: "long", month: "long", day: "numeric" },
+    env.APP_TIME_ZONE,
+  );
 
   return (
     <DashboardView
@@ -143,7 +151,9 @@ export default async function DashboardPage() {
       greeting={greeting}
       todayName={weekday}
       nowMinutes={minutes}
-      isoDate={new Date().toISOString()}
+      headerDate={headerDate}
+      timeZone={env.APP_TIME_ZONE}
+      nowMs={now.getTime()}
       stats={{
         dueThisWeek,
         completed,
