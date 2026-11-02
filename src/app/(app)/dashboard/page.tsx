@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { prisma } from "@/lib/prisma";
+import { env } from "@/lib/env";
 import { requireUser } from "@/lib/session";
 import { endOfWeek, startOfToday } from "@/lib/format";
 import { pageMetadata } from "@/lib/metadata";
@@ -8,6 +9,33 @@ import { computeCourseStats, computeGpa } from "@/lib/gpa";
 import { parseClockPreference } from "@/lib/preferences";
 import type { ScheduleAccent } from "@/lib/schedule";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
+
+/**
+ * Weekday and minute-of-day in the campus time zone.
+ *
+ * Computing these on the server keeps the SSR output and the hydrated client
+ * identical; deriving them in the browser from `new Date()` mismatches when the
+ * server runs in UTC and the student is in Cairo.
+ */
+function zonedNow(timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "long",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const read = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  const rawHour = Number(read("hour"));
+  const hour = rawHour === 24 ? 0 : rawHour;
+
+  return {
+    weekday: read("weekday"),
+    hour,
+    minutes: hour * 60 + Number(read("minute")),
+  };
+}
 
 export function generateMetadata(): Promise<Metadata> {
   return pageMetadata((t) => t.nav.dashboard);
@@ -106,13 +134,15 @@ export default async function DashboardPage() {
     .slice(0, 6)
     .map((item) => ({ ...item, dueDate: item.dueDate.toISOString() }));
 
-  const hour = new Date().getHours();
+  const { weekday, minutes, hour } = zonedNow(env.APP_TIME_ZONE);
   const greeting = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
 
   return (
     <DashboardView
       name={user.name}
       greeting={greeting}
+      todayName={weekday}
+      nowMinutes={minutes}
       isoDate={new Date().toISOString()}
       stats={{
         dueThisWeek,

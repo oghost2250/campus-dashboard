@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/provider";
 import { daysUntil, formatDate } from "@/lib/format";
-import { SCHEDULE_DAYS, type ScheduleCourse } from "@/lib/schedule";
+import type { ScheduleCourse } from "@/lib/schedule";
 import { formatClock, type ClockFormat } from "@/lib/time";
 import type { StatsDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,10 @@ type DeadlineItem = {
 type Props = {
   name: string | null;
   greeting: "morning" | "afternoon" | "evening";
+  /** Weekday name computed on the server in the campus time zone. */
+  todayName: string;
+  /** Minutes since midnight, same source as `todayName`. */
+  nowMinutes: number;
   isoDate: string;
   stats: StatsDTO;
   nextDeadline: DeadlineItem | null;
@@ -68,6 +72,8 @@ function toMinutes(time: string): number {
 export function DashboardView({
   name,
   greeting,
+  todayName,
+  nowMinutes,
   isoDate,
   stats,
   nextDeadline,
@@ -86,8 +92,6 @@ export function DashboardView({
         ? t.dashboard.greetingAfternoon
         : t.dashboard.greetingEvening;
 
-  const todayName = SCHEDULE_DAYS[new Date().getDay()];
-  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes();
   const todayClasses = schedule
     .filter((course) => course.day === todayName)
     .sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime));
