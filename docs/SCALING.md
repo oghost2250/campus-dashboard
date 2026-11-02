@@ -25,6 +25,15 @@ students on Vercel + Neon Postgres.
   an admin approves, suspends, or deletes an account.
 - Creating batch assignments is capped at 10 per 10 minutes and 50 per day per
   user. Registration is capped at 5 attempts per IP per 10 minutes.
+- Verified Google sign-ins using `@zewail.edu.eg` are activated automatically.
+  Password registrations stay pending until an admin approves them. Suspended
+  accounts stay suspended.
+- The dashboard calculates task totals in Postgres and loads only the six
+  nearest task deadlines instead of transferring every task to the server.
+- Lecture and assignment push sends use a bounded worker pool, so a large class
+  does not create a thousand sequential network waits in one function.
+- Registration returns without waiting for Moodle; its optional connection
+  runs after the response and is capped at eight seconds.
 
 ## Browser storage
 

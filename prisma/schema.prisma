@@ -37,41 +37,41 @@ enum UserStatus {
 }
 
 model User {
-  id            String     @id @default(cuid())
-  name          String?
-  email         String     @unique
-  emailVerified DateTime?
-  image         String?
-  passwordHash  String? // null for OAuth-only accounts
-  locale        String     @default("en") // "en" | "ar"
-  theme         String? // "light" | "dark" | "system"; null = system
-  timeFormat    String     @default("12h") // "12h" | "24h"
+  id               String     @id @default(cuid())
+  name             String?
+  email            String     @unique
+  emailVerified    DateTime?
+  image            String?
+  passwordHash     String? // null for OAuth-only accounts
+  locale           String     @default("en") // "en" | "ar"
+  theme            String? // "light" | "dark" | "system"; null = system
+  timeFormat       String     @default("12h") // "12h" | "24h"
   pomodoroSettings Json? // { focus, short, long, sound, autoStart }
-  gpaScale      Int? // null until the student picks 4 or 5
-  isDeveloper   Boolean    @default(false)
-  role          UserRole   @default(USER)
-  status        UserStatus @default(PENDING)
-  approvedAt    DateTime? // set when an admin first activates the account
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  gpaScale         Int? // null until the student picks 4 or 5
+  isDeveloper      Boolean    @default(false)
+  role             UserRole   @default(USER)
+  status           UserStatus @default(PENDING)
+  approvedAt       DateTime? // set when an admin first activates the account
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
 
-  accounts       Account[]
-  sessions       Session[]
-  tasks          Task[]
-  snippets       Snippet[]
-  courses        Course[]
-  notes          Note[]
-  pomodoros      PomodoroSession[]
-  syllabusTopics SyllabusTopic[]
-  projects       Project[]
-  submissions    AssignmentSubmission[]
-  assignments    Assignment[]
-  moodleToken    String?
-  moodleUrl      String?
-  auditEntries   AuditLog[] @relation("AuditActor")
-  auditTargets   AuditLog[] @relation("AuditTarget")
-  studyMaterials StudyMaterial[]
-  scheduleCourses ScheduleCourse[]
+  accounts          Account[]
+  sessions          Session[]
+  tasks             Task[]
+  snippets          Snippet[]
+  courses           Course[]
+  notes             Note[]
+  pomodoros         PomodoroSession[]
+  syllabusTopics    SyllabusTopic[]
+  projects          Project[]
+  submissions       AssignmentSubmission[]
+  assignments       Assignment[]
+  moodleToken       String?
+  moodleUrl         String?
+  auditEntries      AuditLog[]             @relation("AuditActor")
+  auditTargets      AuditLog[]             @relation("AuditTarget")
+  studyMaterials    StudyMaterial[]
+  scheduleCourses   ScheduleCourse[]
   pushSubscriptions PushSubscription[]
 
   // Admin directory is ordered by status then recency; this keeps that scan cheap.
@@ -223,8 +223,9 @@ model ScheduleCourse {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId             String
+  user               User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminderDeliveries ClassReminderDelivery[]
 
   @@index([userId, day, startTime])
   @@map("schedule_courses")
@@ -241,11 +242,30 @@ model PushSubscription {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                       String
+  user                         User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminderDeliveries           ClassReminderDelivery[]
+  assignmentReminderDeliveries AssignmentReminderDelivery[]
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+/// Makes each scheduled class reminder idempotent across scheduler retries.
+model ClassReminderDelivery {
+  id               String    @id @default(cuid())
+  scheduleCourseId String
+  subscriptionId   String
+  classDate        DateTime  @db.Date
+  claimedAt        DateTime  @default(now())
+  sentAt           DateTime?
+
+  scheduleCourse ScheduleCourse   @relation(fields: [scheduleCourseId], references: [id], onDelete: Cascade)
+  subscription   PushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([scheduleCourseId, subscriptionId, classDate])
+  @@index([classDate])
+  @@map("class_reminder_deliveries")
 }
 
 model Assessment {
@@ -411,13 +431,30 @@ model Assignment {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdBy          User?                        @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  reminderDeliveries AssignmentReminderDelivery[]
 
   // Hot path: one cohort's active feed, soonest first.
   @@index([cohort, isActive, dueDate])
   @@index([createdById])
   @@index([createdAt])
   @@map("assignments")
+}
+
+/// Prevents the five-minute reminder scheduler from sending the same alert twice.
+model AssignmentReminderDelivery {
+  id             String    @id @default(cuid())
+  assignmentId   String
+  subscriptionId String
+  claimedAt      DateTime  @default(now())
+  sentAt         DateTime?
+
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  subscription PushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, subscriptionId])
+  @@index([claimedAt])
+  @@map("assignment_reminder_deliveries")
 }
 
 /// Shared study material (note, exam, summary, assignment). Private materials

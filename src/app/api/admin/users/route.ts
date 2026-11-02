@@ -102,6 +102,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return invalid(parsed.error);
 
   const { name, email, password, role, status } = parsed.data;
+  const effectiveStatus = status;
 
   if (role === "SUPER_ADMIN") {
     return forbidden("SUPER_ADMIN_PROMOTION_ONLY");
@@ -120,8 +121,8 @@ export async function POST(request: Request) {
         email,
         passwordHash,
         role,
-        status,
-        approvedAt: status === "ACTIVE" ? new Date() : null,
+        status: effectiveStatus,
+        approvedAt: effectiveStatus === "ACTIVE" ? new Date() : null,
         emailVerified: new Date(),
       },
       select: adminUserSelect,

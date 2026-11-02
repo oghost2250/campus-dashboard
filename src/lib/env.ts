@@ -35,7 +35,7 @@ const envSchema = z.object({
   NEXT_PUBLIC_VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
   VAPID_SUBJECT: z.string().min(1).default("mailto:no-reply@example.com"),
-  /** Shared secret Vercel Cron sends as "Authorization: Bearer <secret>". */
+  /** Shared secret the reminder scheduler sends as "Authorization: Bearer <secret>". */
   CRON_SECRET: z.string().optional(),
   /** IANA zone used to read schedule days/times (stored as local wall time). */
   APP_TIME_ZONE: z.string().min(1).default("Africa/Cairo"),

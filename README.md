@@ -53,7 +53,7 @@ password `campus1234`. To make yourself the admin, register (or have an admin
 create) your account, then run:
 
 ```bash
-npm run db:promote -- s-o.ali77@zewailcity.edu.eg
+npm run db:promote -- s-o.ali77@zewail.edu.eg
 ```
 
 | Email                           | Role  | Status  | What it shows                              |
@@ -62,10 +62,10 @@ npm run db:promote -- s-o.ali77@zewailcity.edu.eg
 | `s-o.mariam31@zewailcity.edu.eg`| User  | Active  | An approved student with a little activity |
 | `s-o.nour12@zewailcity.edu.eg`  | User  | Pending | The waiting screen at `/pending`           |
 
-…or create a fresh account at `/register`. New accounts start **pending**: you can
-sign in, but the dashboard stays locked until an admin approves you. That is also
-the best way to see that data is genuinely scoped per user — approve the account
-from the admin page, then note that every module starts empty.
+Create an account at `/register`. A Google sign-in with a verified
+`@zewail.edu.eg` address is activated automatically. Password sign-ups wait for
+an admin to approve them, because entering a campus address alone does not prove
+ownership. Every account starts with its own private workspace.
 
 > No Docker? Point `DATABASE_URL` at any Postgres 14+ instance and run
 > `npm run db:push && npm run db:seed`.
@@ -84,17 +84,17 @@ Every variable lives in `.env.example`. `.env` is git-ignored.
 | `AUTH_TRUST_HOST`       |    —     | Set `true` behind a proxy / on a LAN IP.                         |
 | `AUTH_GOOGLE_ID`        |    —     | With the next var, enables the Google button.                    |
 | `AUTH_GOOGLE_SECRET`    |    —     | Leave blank to hide Google sign-in entirely.                     |
-| `ALLOWED_EMAIL_DOMAIN`  |    —     | Lock registration to a campus domain, e.g. `zewailcity.edu.eg`.  |
+| `ALLOWED_EMAIL_DOMAIN`  |    —     | Lock registration to a campus domain, e.g. `zewail.edu.eg`.  |
 | `NEXT_PUBLIC_APP_URL`   |    —     | Used in metadata.                                                |
 
 Google OAuth is optional by design: the provider is registered only when both
 credentials are present, so email/password works out of the box. Authorized
 redirect URI: `http://localhost:3000/api/auth/callback/google`.
 
-Student addresses follow the campus pattern — `s-o.ali77@zewailcity.edu.eg`.
-Set `ALLOWED_EMAIL_DOMAIN=zewailcity.edu.eg` to reject sign-ups from outside your
-university; leave it blank for open registration. The demo account matches either
-way.
+Google sign-ins with a verified `@zewail.edu.eg` address are approved
+automatically. Password sign-ups require admin approval. Set
+`ALLOWED_EMAIL_DOMAIN=zewail.edu.eg` to block registrations from other domains;
+leave it blank to accept them for admin review.
 
 ---
 
@@ -120,11 +120,13 @@ accounts are untouched.
 
 ### Becoming the first admin
 
-Every new sign-up is a pending student, so someone has to be promoted out of band:
+Verified campus Google sign-ins are active immediately. Password sign-ups need
+admin approval. To create the first admin, register and promote the account
+out of band:
 
 ```bash
 # register normally, then:
-npm run db:promote -- you@zewailcity.edu.eg
+npm run db:promote -- you@zewail.edu.eg
 ```
 
 The command is idempotent and also works to approve an account that signed up
@@ -170,8 +172,9 @@ switch via `keepalive`), GitHub-flavoured preview, pinning, word count, and
 relative timestamps.
 
 ### Accounts & verification
-Sign-ups land in a review queue instead of an open workspace. `/dashboard/admin`
-gives admins a searchable account list with status + role filters and live counters
+Verified Google sign-ins using `@zewail.edu.eg` activate automatically;
+password sign-ups wait for review. `/dashboard/admin` gives admins a searchable
+account list with status + role filters and live counters
 (accounts, pending, active, admins). From there an admin can:
 
 - **Approve** a pending account (sets `ACTIVE`, stamps `approvedAt`).
@@ -198,17 +201,18 @@ last remaining active admin cannot be demoted, suspended, or deleted.
 - Role-aware navigation: the Administration group only appears for admins.
 
 ### Class alarms (Web Push)
-The schedule header has an **Enable class alarms** toggle. It registers
-`public/service-worker.js` (push-only — it never caches pages), asks for
+The schedule page and settings have an **Enable reminders** toggle. It registers
+`public/service-worker.js` (push-only; it does not cache pages), asks for
 notification permission, subscribes with the VAPID public key, and stores the
 endpoint in `push_subscriptions` (`PushSubscription`).
 
-A Vercel Cron job (`vercel.json`, `0 * * * *`) calls
-`GET /api/cron/lecture-alarms` every hour. The handler resolves the local day
-and "now + 1 hour" in `APP_TIME_ZONE`, finds every `schedule_courses` row
-starting in that window, and sends an "Upcoming Class!" notification through
-`web-push` to each owner's subscriptions. Endpoints the push service reports as
-gone (404 / 410) are deleted automatically.
+The GitHub Actions workflow `.github/workflows/push-reminders.yml` calls the
+lecture and assignment reminder endpoints every five minutes. Class alerts are
+sent one hour before each student's own scheduled class. Active students with
+push enabled receive the app's shared First Year CS (CS-1) assignment alert one
+day before its deadline; the app does not yet store each student's cohort.
+delivery records prevent repeat alerts on later scheduler runs. Expired push
+subscriptions are removed automatically.
 
 Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, and
 `CRON_SECRET` (see `.env.example`). Generate the key pair once with
@@ -216,9 +220,18 @@ Set `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, and
 subscriptions, so users toggle alarms on again. Push requires HTTPS outside
 `localhost`.
 
-Vercel's Hobby plan limits cron jobs to once a day — hourly alarms need Pro, or
-any external scheduler that calls the endpoint with
-`Authorization: Bearer $CRON_SECRET`.
+For Vercel Hobby, add `CAMPUS_APP_URL` (the deployed site URL) and `CRON_SECRET`
+as GitHub repository Actions secrets. Use the same `CRON_SECRET` in Vercel
+Environment Variables. GitHub Actions runs every five minutes; GitHub may delay
+scheduled runs, so delivery can be a few minutes late. This avoids requiring a
+paid Vercel plan.
+
+### Install Campus on a phone
+Campus includes a web app manifest and service worker. On Android, use the
+browser's **Install app** or **Add to Home Screen** option. On iPhone, open the
+site in Safari, tap **Share**, then **Add to Home Screen**. Push alerts require
+the user to enable them in **Settings**; on iPhone, install Campus to the Home
+Screen before enabling notifications.
 
 ---
 
@@ -355,9 +368,8 @@ The repo was exercised end-to-end against a local PostgreSQL 18 instance:
   reactivated a student, promoted/demoted, created and deleted an account, and
   confirmed the self-action guard rails (`403 SELF_ROLE` / `SELF_STATUS` /
   `SELF_DELETE`) plus duplicate-email handling (`409 EMAIL_TAKEN`).
-- Registered a fresh account → landed on `/pending`; a direct visit to
-  `/dashboard` while pending redirected back to `/pending`. After approval the
-  same account reached the dashboard and saw no Administration nav.
+- Verified campus Google accounts are approved automatically; password
+  registrations stay pending for admin review.
 
 ---
 
@@ -377,9 +389,9 @@ The repo was exercised end-to-end against a local PostgreSQL 18 instance:
 
 ---
 
-- **Approval is manual by design.** There is no email verification, so a campus
-  admin is the gatekeeper. Set `ALLOWED_EMAIL_DOMAIN` to keep sign-ups on your
-  university's domain.
+- **Campus account approval is automatic for verified Google sign-ins.**
+  Password sign-ups wait for admin review. Set `ALLOWED_EMAIL_DOMAIN` to block
+  all other domains.
 - Seeded demo passwords exist for convenience — change or remove them before
   exposing the app publicly.
 - No password reset or email-change flow yet (Google OAuth or a direct

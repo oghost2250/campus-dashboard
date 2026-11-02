@@ -18,10 +18,17 @@ export default async function DashboardPage() {
   const today = startOfToday();
   const weekEnd = endOfWeek();
 
-  const [tasks, courses, focus, schedule] = await Promise.all([
+  const [completed, dueThisWeek, taskCount, taskDeadlines, courses, focus, schedule] = await Promise.all([
+    prisma.task.count({ where: { userId: user.id, status: "DONE" } }),
+    prisma.task.count({
+      where: { userId: user.id, status: { not: "DONE" }, dueDate: { lte: weekEnd } },
+    }),
+    prisma.task.count({ where: { userId: user.id } }),
     prisma.task.findMany({
-      where: { userId: user.id },
+      where: { userId: user.id, status: { not: "DONE" }, dueDate: { gte: today } },
+      select: { id: true, title: true, subject: true, dueDate: true },
       orderBy: [{ dueDate: "asc" }, { createdAt: "desc" }],
+      take: 6,
     }),
     prisma.course.findMany({
       where: { userId: user.id },
@@ -57,13 +64,14 @@ export default async function DashboardPage() {
     }),
   ]);
 
-  const openTasks = tasks.filter((task) => task.status !== "DONE");
-
-  const dueThisWeek = openTasks.filter(
-    (task) => task.dueDate && task.dueDate <= weekEnd,
-  ).length;
-
-  const completed = tasks.filter((task) => task.status === "DONE").length;
+  const upcomingTaskDeadlines = taskDeadlines.map((task) => ({
+      key: `task-${task.id}`,
+      title: task.title,
+      subtitle: task.subject,
+      dueDate: task.dueDate as Date,
+      kind: "task" as const,
+      type: null,
+    }));
 
   const { gpa } = computeGpa(
     courses.map((course) => ({
@@ -72,17 +80,6 @@ export default async function DashboardPage() {
     })),
     user.gpaScale === 5 ? 5 : 4,
   );
-
-  const taskDeadlines = openTasks
-    .filter((task) => task.dueDate !== null)
-    .map((task) => ({
-      key: `task-${task.id}`,
-      title: task.title,
-      subtitle: task.subject,
-      dueDate: task.dueDate as Date,
-      kind: "task" as const,
-      type: null,
-    }));
 
   const assessmentDeadlines = courses.flatMap((course) =>
     course.assessments
@@ -97,7 +94,7 @@ export default async function DashboardPage() {
       })),
   );
 
-  const allDeadlines = [...taskDeadlines, ...assessmentDeadlines].sort(
+  const allDeadlines = [...upcomingTaskDeadlines, ...assessmentDeadlines].sort(
     (a, b) => a.dueDate.getTime() - b.dueDate.getTime(),
   );
 
@@ -145,7 +142,7 @@ export default async function DashboardPage() {
       timeFormat={parseClockPreference(user.timeFormat)}
       onboarding={{
         courses: courses.length > 0,
-        assignment: tasks.length > 0,
+        assignment: taskCount > 0,
         gpaScale: user.gpaScale !== null,
       }}
     />

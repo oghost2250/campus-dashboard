@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { isExpiredSubscription, isPushConfigured, sendClassAlarm } from "@/lib/push";
 import { prisma } from "@/lib/prisma";
 import { toMinutes } from "@/lib/time";
+import { forEachConcurrent } from "@/lib/concurrency";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -11,7 +12,7 @@ export const runtime = "nodejs";
 /** How far a class may be from "exactly one hour away" before it is skipped. */
 const WINDOW_MINUTES = 5;
 
-type ZonedTarget = { day: string; minutes: number };
+type ZonedTarget = { day: string; date: string; minutes: number };
 
 /** Wall-clock day + minute-of-day for `date` in `timeZone`. */
 function zonedTarget(timeZone: string, date: Date): ZonedTarget {
@@ -30,6 +31,7 @@ function zonedTarget(timeZone: string, date: Date): ZonedTarget {
 
   return {
     day: values.get("weekday") ?? "",
+    date: `${values.get("year")}-${values.get("month")}-${values.get("day")}`,
     minutes: Number(hour) * 60 + Number(minute),
   };
 }
@@ -55,6 +57,9 @@ export async function GET(request: Request) {
     env.APP_TIME_ZONE,
     new Date(Date.now() + 60 * 60 * 1000),
   );
+  const [year, month, day] = target.date.split("-").map(Number);
+  const classDate = new Date(Date.UTC(year, month - 1, day));
+  const claimExpiredBefore = new Date(Date.now() - 15 * 60 * 1000);
 
   const courses = await prisma.scheduleCourse.findMany({
     where: {
@@ -84,8 +89,36 @@ export async function GET(request: Request) {
   let sent = 0;
   let failed = 0;
   let pruned = 0;
+  let skipped = 0;
 
-  for (const course of due) {
+  const deliveries = due.flatMap((course) =>
+    course.user.pushSubscriptions.map((subscription) => ({ course, subscription })),
+  );
+
+  await forEachConcurrent(deliveries, 25, async ({ course, subscription }) => {
+    const claim = await prisma.classReminderDelivery.createMany({
+      data: [{
+        scheduleCourseId: course.id,
+        subscriptionId: subscription.id,
+        classDate,
+      }],
+      skipDuplicates: true,
+    });
+    const acquired = claim.count === 1 || (await prisma.classReminderDelivery.updateMany({
+      where: {
+        scheduleCourseId: course.id,
+        subscriptionId: subscription.id,
+        classDate,
+        sentAt: null,
+        claimedAt: { lt: claimExpiredBefore },
+      },
+      data: { claimedAt: new Date() },
+    })).count === 1;
+    if (!acquired) {
+      skipped += 1;
+      return;
+    }
+
     const location = course.room?.trim();
     const payload = {
       title: "Upcoming Class!",
@@ -94,23 +127,44 @@ export async function GET(request: Request) {
       tag: `class-${course.id}`,
     };
 
-    for (const subscription of course.user.pushSubscriptions) {
-      try {
-        await sendClassAlarm(subscription, payload);
-        sent += 1;
-      } catch (error) {
-        failed += 1;
-        if (isExpiredSubscription(error)) {
-          await prisma.pushSubscription
-            .delete({ where: { id: subscription.id } })
-            .then(() => {
-              pruned += 1;
-            })
-            .catch(() => {});
-        }
+    try {
+      await sendClassAlarm(subscription, payload);
+      sent += 1;
+      await prisma.classReminderDelivery.updateMany({
+        where: {
+          scheduleCourseId: course.id,
+          subscriptionId: subscription.id,
+          classDate,
+        },
+        data: { sentAt: new Date() },
+      });
+    } catch (error) {
+      failed += 1;
+      if (isExpiredSubscription(error)) {
+        await prisma.pushSubscription
+          .delete({ where: { id: subscription.id } })
+          .then(() => {
+            pruned += 1;
+          })
+          .catch(() => {});
       }
+      await prisma.classReminderDelivery.deleteMany({
+        where: {
+          scheduleCourseId: course.id,
+          subscriptionId: subscription.id,
+          classDate,
+          sentAt: null,
+        },
+      });
+      await prisma.classReminderDelivery.deleteMany({
+        where: {
+          scheduleCourseId: course.id,
+          subscriptionId: subscription.id,
+          classDate,
+        },
+      });
     }
-  }
+  });
 
   return NextResponse.json({
     ok: true,
@@ -120,5 +174,6 @@ export async function GET(request: Request) {
     sent,
     failed,
     pruned,
+    skipped,
   });
 }

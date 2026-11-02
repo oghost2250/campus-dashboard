@@ -8,6 +8,7 @@ import { authConfig } from "@/auth.config";
 import { prisma } from "@/lib/prisma";
 import { loginSchema } from "@/lib/validations/auth";
 import { isGoogleEnabled } from "@/lib/env";
+import { isAutomaticallyApprovedEmail } from "@/lib/account-approval";
 import type { NextAuthConfig } from "next-auth";
 
 const providers: NextAuthConfig["providers"] = [
@@ -82,8 +83,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   events: {
     // Keep the JWT session usable after a user record is removed.
-    async signIn({ user }) {
+    async signIn({ user, account, profile }) {
       if (user?.id) {
+        if (
+          isAutomaticallyApprovedEmail(
+            user.email,
+            account?.provider,
+            account?.provider === "google" && profile?.email_verified === true,
+          )
+        ) {
+          // Only Google-verified campus addresses can self-activate. Never
+          // reactivate suspended accounts.
+          await prisma.user.updateMany({
+            where: { id: user.id, status: "PENDING" },
+            data: { status: "ACTIVE", approvedAt: new Date() },
+          }).catch(() => undefined);
+        }
         await prisma.user
           .update({
             where: { id: user.id },

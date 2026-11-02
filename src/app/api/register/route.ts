@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 
@@ -38,7 +38,6 @@ export async function POST(request: Request) {
   }
 
   const { name, email, password } = parsed.data;
-
   // Optional campus allowlist: when ALLOWED_EMAIL_DOMAIN is set, only that
   // university's addresses can register. Off by default.
   if (env.ALLOWED_EMAIL_DOMAIN && !email.endsWith(`@${env.ALLOWED_EMAIL_DOMAIN}`)) {
@@ -52,7 +51,11 @@ export async function POST(request: Request) {
     // signup can never leave a student without their course list.
     const user = await prisma.$transaction(async (tx) => {
       const created = await tx.user.create({
-        data: { name, email, passwordHash },
+        data: {
+          name,
+          email,
+          passwordHash,
+        },
         select: { id: true, email: true, name: true },
       });
 
@@ -69,30 +72,32 @@ export async function POST(request: Request) {
       return created;
     });
 
-    // Attempt automatic Moodle SSO handshake using the signup credentials.
-    // A slow Moodle must never hold the signup request open.
-    const moodleUrl = "https://moodle.zewailcity.edu.eg";
-    try {
-      const tokenResponse = await fetch(`${moodleUrl}/login/token.php`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          username: email,
-          password,
-          service: "moodle_mobile_app",
-        }).toString(),
-        signal: AbortSignal.timeout(MOODLE_HANDSHAKE_TIMEOUT_MS),
-      });
-      const tokenData = await tokenResponse.json().catch(() => null);
-      if (tokenData?.token) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { moodleToken: tokenData.token, moodleUrl },
+    // Keep the signup response independent of Moodle latency. Next.js completes
+    // this best-effort integration after it has returned the response.
+    after(async () => {
+      const moodleUrl = "https://moodle.zewailcity.edu.eg";
+      try {
+        const tokenResponse = await fetch(`${moodleUrl}/login/token.php`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            username: email,
+            password,
+            service: "moodle_mobile_app",
+          }).toString(),
+          signal: AbortSignal.timeout(MOODLE_HANDSHAKE_TIMEOUT_MS),
         });
+        const tokenData = await tokenResponse.json().catch(() => null);
+        if (tokenData?.token) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { moodleToken: tokenData.token, moodleUrl },
+          });
+        }
+      } catch {
+        // Moodle may be unavailable or credentials invalid; signup still succeeds.
       }
-    } catch {
-      // Moodle may be unreachable or credentials invalid; signup still succeeds.
-    }
+    });
 
     return NextResponse.json({ user }, { status: 201 });
   } catch (error) {

@@ -31,6 +31,8 @@ import { useI18n } from "@/i18n/provider";
 import { signOutAction } from "@/app/actions/auth";
 import type { Locale } from "@/i18n/config";
 import { cn } from "@/lib/utils";
+import { ClassAlarmsToggle } from "@/components/notifications/class-alarms-toggle";
+import { InstallAppButton } from "@/components/settings/install-app-button";
 
 const themes = [
   { value: "light", icon: Sun, key: "light" },
@@ -48,6 +50,7 @@ function initials(name: string | null, email: string) {
 
 export function SettingsView({
   user,
+  pushPublicKey,
 }: {
   user: {
     name: string | null;
@@ -56,6 +59,7 @@ export function SettingsView({
     gpaScale: number | null;
     isDeveloper: boolean;
   };
+  pushPublicKey: string | null;
 }) {
   const { t, locale, setLocale } = useI18n();
   const router = useRouter();
@@ -167,6 +171,23 @@ export function SettingsView({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl border border-border/70 bg-card/70 p-5 shadow-soft backdrop-blur-sm lg:col-span-2">
+          <div className="flex items-center gap-2">
+            <Monitor className="size-4 text-primary" />
+            <h2 className="text-sm font-semibold tracking-tight">
+              {locale === "ar" ? "تطبيق Campus والتنبيهات" : "Campus app & reminders"}
+            </h2>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {locale === "ar"
+              ? "ثبّت التطبيق، واستقبل تنبيه المحاضرة قبل ساعة وموعد التسليم قبل يوم."
+              : "Install the app and get a reminder one hour before class and one day before assignment deadlines."}
+          </p>
+          <InstallAppButton />
+          <Separator className="my-4" />
+          <ClassAlarmsToggle publicKey={pushPublicKey} />
+        </section>
+
         <section className="rounded-2xl border border-border/70 bg-card/70 p-5 shadow-soft backdrop-blur-sm lg:col-span-2">
           <div className="flex items-center gap-2">
             <UserRound className="size-4 text-primary" />

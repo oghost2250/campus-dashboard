@@ -27,7 +27,8 @@ self.addEventListener("push", (event) => {
     icon: data.icon || ICON,
     badge: data.badge || ICON,
     tag: data.tag || "class-alarm",
-    renotify: Boolean(data.tag),
+    // Repeated scheduler ticks replace the visible reminder quietly.
+    renotify: false,
     requireInteraction: true,
     timestamp: Date.now(),
     data: { url: data.url || FALLBACK_URL },

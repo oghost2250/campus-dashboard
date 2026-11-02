@@ -96,7 +96,7 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
   async function enable() {
     if (pending) return;
     if (!publicKey) {
-      toast.error("Class alarms are not configured on this server.");
+      toast.error("Push reminders are not configured on this server.");
       return;
     }
     if (Notification.permission === "denied") {
@@ -167,7 +167,7 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
 
       await saveSubscription(subscription);
       setSubscribed(true);
-      toast.success("Class alarms enabled on this device.");
+      toast.success("Class and assignment reminders enabled on this device.");
     } catch (error) {
       console.error("[class-alarms] enable failed:", error);
       const message =
@@ -191,7 +191,7 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
       await removeSubscription(subscription?.endpoint);
       await subscription?.unsubscribe();
       setSubscribed(false);
-      toast.success("Class alarms disabled on this device.");
+      toast.success("Push reminders disabled on this device.");
     } catch {
       toast.error("Could not disable class alarms.");
     } finally {
@@ -210,8 +210,8 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
       title={
         supported
           ? subscribed
-            ? "Disable class alarms on this device"
-            : "Get a notification one hour before each class"
+            ? "Disable class and assignment reminders on this device"
+            : "Get a reminder before each class and assignment deadline"
           : "Push notifications are not supported in this browser"
       }
       className={[
@@ -231,7 +231,7 @@ export function ClassAlarmsToggle({ publicKey }: { publicKey: string | null }) {
       ) : (
         <Bell className="size-3.5" />
       )}
-      {subscribed ? "Class alarms on" : "Enable class alarms"}
+      {subscribed ? "Reminders on" : "Enable reminders"}
     </button>
   );
 }

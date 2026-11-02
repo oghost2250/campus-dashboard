@@ -35,6 +35,14 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     description: t.common.tagline,
     applicationName: t.common.appName,
+    appleWebApp: {
+      capable: true,
+      title: "Campus",
+      statusBarStyle: "default",
+    },
+    icons: {
+      apple: [{ url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" }],
+    },
     authors: [{ name: t.common.appName }],
     openGraph: {
       title: `${t.common.appName} — ${t.common.tagline}`,
