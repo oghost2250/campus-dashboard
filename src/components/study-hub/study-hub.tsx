@@ -74,8 +74,17 @@ export function StudyHub({ userId }: { userId: string }) {
     const already = await loadPersisted<boolean>(flagKey);
     if (already) return;
 
-    const legacyKeys = ["campus-study-hub", `campus-study-hub:${userId}`];
+    // Only migrate data that was stored under this user's own key. The old
+    // unscoped `campus-study-hub` key may belong to someone else on a shared
+    // browser, so never import it into this account.
+    const legacyKeys = [`campus-study-hub:${userId}`];
     for (const key of legacyKeys) {
+      // Best-effort cleanup of any leftover shared key so it can't leak later.
+      try {
+        await savePersisted("campus-study-hub", []);
+      } catch {
+        /* ignore */
+      }
       const parsed = await loadPersisted<unknown[]>(key);
       if (!Array.isArray(parsed)) continue;
 for (const raw of parsed) {

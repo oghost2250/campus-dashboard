@@ -89,8 +89,9 @@ export async function GET(request: Request) {
       },
       {
         headers: {
-          // Per-user payload (canDelete) but identical for ~15s is fine.
-          "Cache-Control": "private, max-age=15, stale-while-revalidate=45",
+          // Per-user payload (canDelete differs per caller); never cache across
+          // users/devices, even on a shared browser.
+          "Cache-Control": "private, no-store",
         },
       },
     );
