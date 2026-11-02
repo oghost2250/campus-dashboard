@@ -564,6 +564,11 @@ export const en = {
     unauthorized: "You need to sign in to do that.",
     notFound: "We could not find that.",
     validation: "Please check the highlighted fields.",
+    required: "This field is required.",
+    name: "Enter your full name (at least 2 characters).",
+    email: "Enter a valid email address.",
+    password: "Use at least 8 characters, with a letter and a number.",
+    confirmPassword: "Passwords do not match.",
   },
 };
 

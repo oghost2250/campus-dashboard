@@ -15,7 +15,7 @@ type Material = {
   course: string;
   category: Category;
   privacy: Privacy;
-  fileData: string;
+  fileUrl: string;
   fileType: string;
   owner: string;
   createdAt: number;
@@ -35,7 +35,7 @@ function dtoToMaterial(dto: StudyMaterialDTO): Material {
     course: dto.course,
     category: dto.category as Category,
     privacy: dto.privacy,
-    fileData: dto.fileData,
+    fileUrl: dto.fileUrl,
     fileType: dto.fileType,
     owner: dto.owner,
     createdAt: new Date(dto.createdAt).getTime(),
@@ -418,7 +418,7 @@ for (const raw of parsed) {
                   {isImage(material.fileType) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={material.fileData}
+                      src={material.fileUrl}
                       alt={material.title}
                       className="h-full w-full object-cover transition-transform group-hover:scale-105"
                     />
@@ -668,9 +668,9 @@ for (const raw of parsed) {
             <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950">
               {isImage(viewing.fileType) ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={viewing.fileData} alt={viewing.title} className="max-h-[80vh] w-full object-contain" />
+                <img src={viewing.fileUrl} alt={viewing.title} className="max-h-[80vh] w-full object-contain" />
               ) : (
-                <iframe src={viewing.fileData} title={viewing.title} className="h-[80vh] w-full" />
+                <iframe src={viewing.fileUrl} title={viewing.title} className="h-[80vh] w-full" />
               )}
             </div>
             <p className="mt-2 text-xs text-gray-400">{viewing.title}</p>

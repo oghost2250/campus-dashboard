@@ -13,6 +13,11 @@ import { useI18n } from "@/i18n/provider";
 import { GoogleIcon } from "@/components/auth/google-icon";
 import { AuthBrand } from "@/components/auth/auth-brand";
 
+type FieldKey = "name" | "email" | "password" | "confirmPassword";
+type FieldErrors = Partial<Record<FieldKey, string>>;
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -24,42 +29,96 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  function clearFieldError(key: FieldKey) {
+    setFieldErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
+  function validate(): FieldErrors {
+    const next: FieldErrors = {};
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+
+    if (trimmedName.length < 2 || trimmedName.length > 80) {
+      next.name = t.errors.name;
+    }
+    if (!EMAIL_PATTERN.test(trimmedEmail)) {
+      next.email = t.errors.email;
+    }
+    if (
+      password.length < 8 ||
+      password.length > 72 ||
+      !/[a-zA-Z]/.test(password) ||
+      !/[0-9]/.test(password)
+    ) {
+      next.password = t.errors.password;
+    }
+    if (password !== confirmPassword) {
+      next.confirmPassword = t.errors.confirmPassword;
+    }
+    return next;
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
 
-    if (password !== confirmPassword) {
+    const nextErrors = validate();
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
       setError(t.errors.validation);
       return;
     }
 
+    setFieldErrors({});
     setPending(true);
 
     try {
       const response = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, confirmPassword }),
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          password,
+          confirmPassword,
+        }),
       });
 
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as
-          | { error?: string }
+          | { error?: string; fieldErrors?: Record<string, string> }
           | null;
 
-        setError(
-          payload?.error === "EMAIL_TAKEN"
-            ? t.auth.emailTaken
-            : payload?.error === "EMAIL_DOMAIN"
-              ? t.auth.emailDomain
-              : t.errors.validation,
-        );
+        if (payload?.error === "EMAIL_TAKEN") {
+          setFieldErrors({ email: t.auth.emailTaken });
+          setError(t.auth.emailTaken);
+        } else if (payload?.error === "EMAIL_DOMAIN") {
+          setFieldErrors({ email: t.auth.emailDomain });
+          setError(t.auth.emailDomain);
+        } else if (payload?.fieldErrors) {
+          const mapped: FieldErrors = {};
+          for (const key of Object.keys(payload.fieldErrors)) {
+            if (key === "name" || key === "email" || key === "password" || key === "confirmPassword") {
+              mapped[key] = t.errors[key];
+            }
+          }
+          setFieldErrors(mapped);
+          setError(t.errors.validation);
+        } else {
+          setError(t.errors.validation);
+        }
         return;
       }
 
       const result = await signIn("credentials", {
-        email,
+        email: email.trim().toLowerCase(),
         password,
         redirect: false,
       });
@@ -124,11 +183,21 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
                 required
                 minLength={2}
                 value={name}
-                onChange={(event) => setName(event.target.value)}
+                onChange={(event) => {
+                  setName(event.target.value);
+                  clearFieldError("name");
+                }}
                 placeholder={t.auth.namePlaceholder}
                 className="h-11 rounded-xl ps-10"
+                aria-invalid={fieldErrors.name ? true : undefined}
+                aria-describedby={fieldErrors.name ? "name-error" : undefined}
               />
             </div>
+            {fieldErrors.name ? (
+              <p id="name-error" className="text-xs text-destructive">
+                {fieldErrors.name}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1.5">
@@ -142,12 +211,22 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  clearFieldError("email");
+                }}
                 placeholder={t.auth.emailPlaceholder}
                 className="h-11 rounded-xl ps-10"
                 dir="ltr"
+                aria-invalid={fieldErrors.email ? true : undefined}
+                aria-describedby={fieldErrors.email ? "email-error" : undefined}
               />
             </div>
+            {fieldErrors.email ? (
+              <p id="email-error" className="text-xs text-destructive">
+                {fieldErrors.email}
+              </p>
+            ) : null}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -163,10 +242,15 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
                   required
                   minLength={8}
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    clearFieldError("password");
+                  }}
                   placeholder={t.auth.passwordPlaceholder}
                   className="h-11 rounded-xl px-9"
                   dir="ltr"
+                  aria-invalid={fieldErrors.password ? true : undefined}
+                  aria-describedby={fieldErrors.password ? "password-error" : undefined}
                 />
                 <button
                   type="button"
@@ -181,6 +265,11 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
                   )}
                 </button>
               </div>
+              {fieldErrors.password ? (
+                <p id="password-error" className="text-xs text-destructive">
+                  {fieldErrors.password}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">
@@ -194,12 +283,24 @@ export function RegisterForm({ googleEnabled }: { googleEnabled: boolean }) {
                   autoComplete="new-password"
                   required
                   value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  onChange={(event) => {
+                    setConfirmPassword(event.target.value);
+                    clearFieldError("confirmPassword");
+                  }}
                   placeholder={t.auth.passwordPlaceholder}
                   className="h-11 rounded-xl ps-10"
                   dir="ltr"
+                  aria-invalid={fieldErrors.confirmPassword ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.confirmPassword ? "confirm-password-error" : undefined
+                  }
                 />
               </div>
+              {fieldErrors.confirmPassword ? (
+                <p id="confirm-password-error" className="text-xs text-destructive">
+                  {fieldErrors.confirmPassword}
+                </p>
+              ) : null}
             </div>
           </div>
 

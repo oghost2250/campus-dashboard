@@ -22,6 +22,8 @@ const plexArabic = IBM_Plex_Sans_Arabic({
   subsets: ["arabic", "latin"],
   weight: ["400", "500", "600", "700"],
   display: "swap",
+  // English pages never use this family; only fetch it when the locale is Arabic.
+  preload: false,
 });
 
 export async function generateMetadata(): Promise<Metadata> {

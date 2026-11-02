@@ -135,7 +135,8 @@ export type StudyMaterialDTO = {
   course: string;
   category: string;
   privacy: "private" | "public";
-  fileData: string;
+  /** Authenticated URL that streams the stored file on demand. */
+  fileUrl: string;
   fileType: string;
   owner: string;
   createdAt: string;

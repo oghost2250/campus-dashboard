@@ -1,22 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "next-themes";
 import { Check, Copy } from "lucide-react";
 import { toast } from "sonner";
+import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/provider";
 import { cn } from "@/lib/utils";
 
-import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+type PrismStyle = Record<string, CSSProperties>;
 
+// Load the highlighter and both themes together, on demand. Importing the
+// styles barrel statically pulls every Prism theme into the initial bundle.
 const SyntaxHighlighter = dynamic(
-  () =>
-    import("react-syntax-highlighter/dist/esm/prism").then(
-      (module) => module.default,
-    ),
+  async () => {
+    const [{ default: Highlighter }, darkTheme, lightTheme] = await Promise.all([
+      import("react-syntax-highlighter/dist/esm/prism"),
+      import("react-syntax-highlighter/dist/esm/styles/prism/one-dark"),
+      import("react-syntax-highlighter/dist/esm/styles/prism/one-light"),
+    ]);
+
+    const themes: Record<"dark" | "light", PrismStyle> = {
+      dark: darkTheme.default as PrismStyle,
+      light: lightTheme.default as PrismStyle,
+    };
+
+    function ThemedSyntaxHighlighter(props: SyntaxHighlighterProps) {
+      const { resolvedTheme } = useTheme();
+      return (
+        <Highlighter
+          {...props}
+          style={resolvedTheme === "light" ? themes.light : themes.dark}
+        />
+      );
+    }
+
+    return ThemedSyntaxHighlighter;
+  },
   {
     ssr: false,
     loading: () => (
@@ -91,7 +114,6 @@ export function CodeBlock({
       >
         <SyntaxHighlighter
           language={language || "text"}
-          style={dark ? oneDark : oneLight}
           customStyle={{
             margin: 0,
             padding: "0.9rem 1rem",

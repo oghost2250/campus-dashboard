@@ -5,7 +5,13 @@ const nextConfig: NextConfig = {
   compress: true,
   serverExternalPackages: ["@prisma/client", "bcryptjs", "web-push"],
   experimental: {
-    optimizePackageImports: ["lucide-react", "date-fns", "framer-motion"],
+    optimizePackageImports: [
+      "lucide-react",
+      "date-fns",
+      "framer-motion",
+      "radix-ui",
+      "sonner",
+    ],
   },
 };
 

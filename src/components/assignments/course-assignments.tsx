@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Camera, Clock, ExternalLink, Hourglass, Plus, X } from "lucide-react";
-import { jsPDF } from "jspdf";
 
 import { FIRST_YEAR_SUBJECTS } from "@/lib/subjects";
 import { cn } from "@/lib/utils";
@@ -231,12 +230,14 @@ export function CourseAssignments() {
     setPreviewPdf(null);
   }
 
-  function generatePdf() {
+  async function generatePdf() {
     if (pages.length === 0) {
       setError("Capture or upload at least one page.");
       return;
     }
     try {
+      // Load the PDF engine on demand so it never ships in the initial bundle.
+      const { jsPDF } = await import("jspdf");
       const pdf = new jsPDF({
         orientation: "portrait",
         unit: "mm",

@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { AnimatePresence, motion } from "framer-motion";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   Check,
   Eye,
@@ -39,6 +38,27 @@ import { useI18n } from "@/i18n/provider";
 import { formatDate, wordCount } from "@/lib/format";
 import type { NoteDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// Markdown parsing is only needed in preview mode, so keep it out of the
+// editor's initial bundle.
+const MarkdownPreview = dynamic(
+  async () => {
+    const [{ default: ReactMarkdown }, { default: remarkGfm }] = await Promise.all([
+      import("react-markdown"),
+      import("remark-gfm"),
+    ]);
+
+    return function Preview({ content }: { content: string }) {
+      return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
+    };
+  },
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-24 w-full animate-pulse rounded-lg bg-muted/50" />
+    ),
+  },
+);
 
 type SaveState = "idle" | "saving" | "saved";
 
@@ -451,9 +471,7 @@ export function NotesWorkspace({ initialNotes }: { initialNotes: NoteDTO[] }) {
                       <div className="min-h-[320px] flex-1 overflow-y-auto rounded-xl border border-border/60 bg-background/40 p-5">
                         {selected.content.trim() ? (
                           <div className={markdownProse} dir="auto">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {selected.content}
-                            </ReactMarkdown>
+                            <MarkdownPreview content={selected.content} />
                           </div>
                         ) : (
                           <p className="text-sm text-muted-foreground">

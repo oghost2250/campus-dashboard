@@ -13,6 +13,10 @@ import { useI18n } from "@/i18n/provider";
 import { GoogleIcon } from "@/components/auth/google-icon";
 import { AuthBrand } from "@/components/auth/auth-brand";
 
+type FieldErrors = { email?: string; password?: string };
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
   const { t } = useI18n();
   const router = useRouter();
@@ -22,15 +26,37 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
   const [showPassword, setShowPassword] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  function clearFieldError(key: keyof FieldErrors) {
+    setFieldErrors((current) => {
+      if (!current[key]) return current;
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+
+    const nextErrors: FieldErrors = {};
+    if (!EMAIL_PATTERN.test(email.trim())) nextErrors.email = t.errors.email;
+    if (!password) nextErrors.password = t.errors.required;
+
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      setError(t.errors.validation);
+      return;
+    }
+
+    setFieldErrors({});
     setPending(true);
 
     try {
       const result = await signIn("credentials", {
-        email,
+        email: email.trim().toLowerCase(),
         password,
         redirect: false,
       });
@@ -95,12 +121,22 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  clearFieldError("email");
+                }}
                 placeholder={t.auth.emailPlaceholder}
                 className="h-11 rounded-xl ps-10"
                 dir="ltr"
+                aria-invalid={fieldErrors.email ? true : undefined}
+                aria-describedby={fieldErrors.email ? "email-error" : undefined}
               />
             </div>
+            {fieldErrors.email ? (
+              <p id="email-error" className="text-xs text-destructive">
+                {fieldErrors.email}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1.5">
@@ -114,10 +150,15 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
                 autoComplete="current-password"
                 required
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  clearFieldError("password");
+                }}
                 placeholder={t.auth.passwordPlaceholder}
                 className="h-11 rounded-xl px-10"
                 dir="ltr"
+                aria-invalid={fieldErrors.password ? true : undefined}
+                aria-describedby={fieldErrors.password ? "password-error" : undefined}
               />
               <button
                 type="button"
@@ -132,6 +173,11 @@ export function LoginForm({ googleEnabled }: { googleEnabled: boolean }) {
                 )}
               </button>
             </div>
+            {fieldErrors.password ? (
+              <p id="password-error" className="text-xs text-destructive">
+                {fieldErrors.password}
+              </p>
+            ) : null}
           </div>
 
           {error ? (
